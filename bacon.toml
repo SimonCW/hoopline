@@ -1,0 +1,5 @@
+[jobs.run]
+command = ["cargo", "run"]
+watch = ["src", "templates"]             # Also watch templates!
+background = false
+on_change_strategy = "kill_then_restart"
