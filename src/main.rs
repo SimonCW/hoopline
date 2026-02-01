@@ -1,26 +1,11 @@
-mod error;
-
-use askama::Template;
-use axum::{Router, response::Html, routing::get};
-use error::AppError;
-
-#[derive(Template)]
-#[template(path = "hello.html")]
-struct HelloTemplate {
-    name: String,
-}
+use htmx::app;
 
 #[tokio::main]
 async fn main() {
-    let app = Router::new().route("/", get(hello_world));
+    let app = app();
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+        .await
+        .expect("failed to bind listener");
     axum::serve(listener, app).await.unwrap();
-}
-
-async fn hello_world() -> Result<Html<String>, AppError> {
-    let template = HelloTemplate {
-        name: "Tt".to_string(),
-    };
-    Ok(Html(template.render()?))
 }
