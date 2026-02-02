@@ -190,7 +190,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "htmx"
+name = "hoops-booking"
 version = "0.1.0"
 dependencies = [
  "askama",

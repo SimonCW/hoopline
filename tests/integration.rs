@@ -1,7 +1,7 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::{BodyExt, Empty};
-use htmx::app;
+use hoops_booking::app;
 use tower::ServiceExt;
 
 #[tokio::test]
