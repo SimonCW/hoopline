@@ -44,10 +44,10 @@ Build the **smallest deployable thing first**, then iterate. Each milestone shou
 **Goal:** Rust/Axum server that serves HTML via Askama templates.
 
 ### Tasks
-- [ ] 0.1: Create basic Axum server that responds to `GET /` with "Hello World"
-- [ ] 0.2: Add Askama template rendering for the index page
-- [ ] 0.3: Add HTMX and basic CSS (minimal styling, mobile-friendly viewport)
-- [ ] 0.4: Add `robots.txt` with `Disallow: /`
+- [x] 0.1: Create basic Axum server that responds to `GET /` with "Hello World"
+- [x] 0.2: Add Askama template rendering for the index page
+- [x] 0.3: Add HTMX and basic CSS (minimal styling, mobile-friendly viewport)
+- [x] 0.4: Add `robots.txt` with `Disallow: /`
 
 ### Test Criteria
 - **Manual:** `cargo run`, visit `http://localhost:3000`, see styled page
@@ -57,7 +57,7 @@ Build the **smallest deployable thing first**, then iterate. Each milestone shou
 ```
 src/main.rs          - Axum server setup, routes
 templates/base.html  - Base layout with HTMX script tag
-templates/index.html - Extends base, shows "Basketball Booking"
+templates/index.html - Extends base, shows "Hoopline"
 ```
 
 ---
@@ -90,12 +90,12 @@ templates/slot_card.html - Individual slot display
 **Goal:** Add visual styling using Tailwind CSS and DaisyUI component library.
 
 ### Tasks
-- [ ] 1.5.1: Add Tailwind CSS via CDN to base template
-- [ ] 1.5.2: Add DaisyUI via CDN
+- [x] 1.5.1: Add Tailwind CSS via CDN to base template
+- [x] 1.5.2: Add DaisyUI via CDN
 - [ ] 1.5.3: Style the slot cards (use DaisyUI `card` component)
 - [ ] 1.5.4: Style player/waitlist as `table` or `list`
 - [ ] 1.5.5: Add responsive layout (mobile-first, single column on phone)
-- [ ] 1.5.6: Choose a DaisyUI theme (e.g., `light`, `dark`, `corporate`)
+- [x] 1.5.6: Choose a DaisyUI theme (e.g., `light`, `dark`, `corporate`)
 
 ### CDN Setup (in base.html)
 ```html
