@@ -9,6 +9,36 @@ Build the **smallest deployable thing first**, then iterate. Each milestone shou
 
 ---
 
+## Milestone -1: Deploy Current Minimal Page to Hostim First
+
+**Goal:** Ship the current minimal UI immediately to `hostim.dev` before any further feature work.
+
+### Tasks
+- [ ] -1.1: Add root `Dockerfile` (default Hostim Dockerfile path) using `cargo-chef` for Rust dependency caching
+- [ ] -1.2: Use Hostim dashboard -> **Create Service** -> **New App** -> **Deployment Type: Git**
+- [ ] -1.3: Select repository + branch (or provide Git URL manually)
+- [ ] -1.4: For private repo, provide Personal Access Token if needed
+- [ ] -1.5: Keep Dockerfile path as `Dockerfile` unless changed
+- [ ] -1.6: Set replicas/plan and create app
+
+### Docker Security Checklist (required)
+- [ ] Multi-stage build (no Rust toolchain in final image)
+- [ ] Use `cargo-chef` planner/cook stages to speed rebuilds without changing runtime footprint
+- [ ] Minimal runtime image
+- [ ] Run app as non-root user
+- [ ] Expose only required app port (`3000`)
+- [ ] Do not bake secrets into image; use Hostim environment variables
+
+### Test Criteria
+- **Manual:**
+  - Hostim app build succeeds from Git
+  - App starts and serves `/` successfully
+  - Homepage shows the current minimal card/box UI
+- **Auto:** Local `cargo test` passes before deployment
+- **Auto:** Local `docker build` succeeds with `cargo-chef`-based Dockerfile
+
+---
+
 ## Milestone 0: Hello World (Foundation)
 
 **Goal:** Rust/Axum server that serves HTML via Askama templates.
