@@ -14,20 +14,20 @@ Build the **smallest deployable thing first**, then iterate. Each milestone shou
 **Goal:** Ship the current minimal UI immediately to `hostim.dev` before any further feature work.
 
 ### Tasks
-- [ ] -1.1: Add root `Dockerfile` (default Hostim Dockerfile path) using `cargo-chef` for Rust dependency caching
-- [ ] -1.2: Use Hostim dashboard -> **Create Service** -> **New App** -> **Deployment Type: Git**
-- [ ] -1.3: Select repository + branch (or provide Git URL manually)
-- [ ] -1.4: For private repo, provide Personal Access Token if needed
-- [ ] -1.5: Keep Dockerfile path as `Dockerfile` unless changed
-- [ ] -1.6: Set replicas/plan and create app
+- [x] -1.1: Add root `Dockerfile` (default Hostim Dockerfile path) using `cargo-chef` for Rust dependency caching
+- [x] -1.2: Use Hostim dashboard -> **Create Service** -> **New App** -> **Deployment Type: Git**
+- [x] -1.3: Select repository + branch (or provide Git URL manually)
+- [x] -1.4: For private repo, provide Personal Access Token if needed
+- [x] -1.5: Keep Dockerfile path as `Dockerfile` unless changed
+- [x] -1.6: Set replicas/plan and create app
 
 ### Docker Security Checklist (required)
-- [ ] Multi-stage build (no Rust toolchain in final image)
-- [ ] Use `cargo-chef` planner/cook stages to speed rebuilds without changing runtime footprint
-- [ ] Minimal runtime image
-- [ ] Run app as non-root user
-- [ ] Expose only required app port (`3000`)
-- [ ] Do not bake secrets into image; use Hostim environment variables
+- [x] Multi-stage build (no Rust toolchain in final image)
+- [x] Use `cargo-chef` planner/cook stages to speed rebuilds without changing runtime footprint
+- [x] Minimal runtime image
+- [x] Run app as non-root user
+- [x] Expose only required app port (`3000`)
+- [x] Do not bake secrets into image; use Hostim environment variables
 
 ### Test Criteria
 - **Manual:**
