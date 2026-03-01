@@ -1,4 +1,4 @@
-use hoops_booking::app;
+use hoopline::app;
 
 #[tokio::main]
 async fn main() {

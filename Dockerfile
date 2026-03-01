@@ -11,7 +11,7 @@ FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --locked --recipe-path recipe.json
 COPY . .
-RUN cargo build --release --locked --bin hoops-booking
+RUN cargo build --release --locked --bin hoopline
 
 FROM debian:bookworm-slim
 RUN apt-get update \
@@ -21,9 +21,9 @@ RUN apt-get update \
 RUN useradd --system --create-home --uid 10001 appuser
 WORKDIR /app
 
-COPY --from=builder /app/target/release/hoops-booking /usr/local/bin/hoops-booking
+COPY --from=builder /app/target/release/hoopline /usr/local/bin/hoopline
 
 USER appuser
 EXPOSE 3000
 
-CMD ["hoops-booking"]
+CMD ["hoopline"]

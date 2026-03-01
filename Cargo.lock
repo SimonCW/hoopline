@@ -190,7 +190,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "hoops-booking"
+name = "hoopline"
 version = "0.1.0"
 dependencies = [
  "askama",

@@ -20,7 +20,7 @@ pub fn app() -> Router {
 
 async fn index() -> Result<Html<String>, AppError> {
     let template = IndexTemplate {
-        title: "Basketball Booking".to_string(),
+        title: "Hoopline".to_string(),
     };
     Ok(Html(template.render()?))
 }
