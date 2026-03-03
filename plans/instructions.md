@@ -67,10 +67,10 @@ templates/index.html - Extends base, shows "Hoopline"
 **Goal:** Display hardcoded slot data (no database yet).
 
 ### Tasks
-- [ ] 1.1: Create `Slot` struct with fields: datetime, venue, players (Vec<String>), waitlist (Vec<String>)
-- [ ] 1.2: Create template that renders a list of slots
-- [ ] 1.3: Each slot shows: date/time, venue, player list (numbered 1-15), waitlist (numbered 1-5)
-- [ ] 1.4: Use hardcoded test data (2-3 slots with some players)
+- [x] 1.1: Create `Slot` struct with fields: datetime, venue, players (Vec<String>), waitlist (Vec<String>)
+- [x] 1.2: Create template that renders a list of slots
+- [x] 1.3: Each slot shows: date/time, venue, player list (numbered 1-15), waitlist (numbered 1-5)
+- [x] 1.4: Use hardcoded test data (2-3 slots with some players)
 
 ### Test Criteria
 - **Manual:** Page shows slots with players listed, looks reasonable on mobile
@@ -92,9 +92,9 @@ templates/slot_card.html - Individual slot display
 ### Tasks
 - [x] 1.5.1: Add Tailwind CSS via CDN to base template
 - [x] 1.5.2: Add DaisyUI via CDN
-- [ ] 1.5.3: Style the slot cards (use DaisyUI `card` component)
-- [ ] 1.5.4: Style player/waitlist as `table` or `list`
-- [ ] 1.5.5: Add responsive layout (mobile-first, single column on phone)
+- [x] 1.5.3: Style the slot cards (use DaisyUI `card` component)
+- [x] 1.5.4: Style player/waitlist as `table` or `list`
+- [x] 1.5.5: Add responsive layout (mobile-first, single column on phone)
 - [x] 1.5.6: Choose a DaisyUI theme (e.g., `light`, `dark`, `corporate`)
 
 ### CDN Setup (in base.html)
