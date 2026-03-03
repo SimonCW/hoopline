@@ -12,3 +12,7 @@ serde = { version = "1.0", features = ["derive"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["trace"] }
 http-body-util = "0.1"
+
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+must_use_candidate = "allow"

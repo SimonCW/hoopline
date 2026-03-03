@@ -53,16 +53,10 @@ impl Slot {
     }
 
     pub fn player_name(&self, index: &usize) -> &str {
-        self.players
-            .get(*index)
-            .map(|name| name.as_str())
-            .unwrap_or("-")
+        self.players.get(*index).map_or("-", String::as_str)
     }
 
     pub fn waitlist_name(&self, index: &usize) -> &str {
-        self.waitlist
-            .get(*index)
-            .map(|name| name.as_str())
-            .unwrap_or("-")
+        self.waitlist.get(*index).map_or("-", String::as_str)
     }
 }
