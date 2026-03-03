@@ -1,14 +1,17 @@
 pub mod error;
+pub mod models;
 
 use askama::Template;
 use axum::{response::Html, routing::get, Router};
 use error::AppError;
+use models::Slot;
 use tower_http::trace::TraceLayer;
 
 #[derive(Template)]
-#[template(path = "index.html")]
-struct IndexTemplate {
+#[template(path = "slots.html")]
+struct SlotsTemplate {
     title: String,
+    slots: Vec<Slot>,
 }
 
 pub fn app() -> Router {
@@ -19,8 +22,9 @@ pub fn app() -> Router {
 }
 
 async fn index() -> Result<Html<String>, AppError> {
-    let template = IndexTemplate {
+    let template = SlotsTemplate {
         title: "Hoopline".to_string(),
+        slots: Slot::sample_slots(),
     };
     Ok(Html(template.render()?))
 }

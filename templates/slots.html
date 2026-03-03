@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<section class="max-w-5xl w-full space-y-4">
+    <div class="text-center">
+        <h1 class="text-3xl font-bold">{{ title }}</h1>
+        <p class="text-base-content/70">Upcoming slots</p>
+    </div>
+    <div class="grid grid-cols-3 gap-4">
+        {% for slot in slots %}
+            {% include "slot_card.html" %}
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

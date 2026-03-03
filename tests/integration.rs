@@ -1,6 +1,6 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use http_body_util::{BodyExt, Empty};
+use http_body_util::BodyExt;
 use hoopline::app;
 use tower::ServiceExt;
 
@@ -19,8 +19,11 @@ async fn get_root_returns_ok_and_body() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let mut body = response.into_body();
+    let body = response.into_body();
     let bytes = body.collect().await.unwrap().to_bytes();
     let body = String::from_utf8(bytes.to_vec()).unwrap();
     assert!(body.contains("Hoopline"));
+    assert_eq!(body.matches("data-testid=\"slot-card\"").count(), 3);
+    assert_eq!(body.matches("data-testid=\"player-row\"").count(), 45);
+    assert_eq!(body.matches("data-testid=\"waitlist-row\"").count(), 15);
 }
