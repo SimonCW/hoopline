@@ -1,6 +1,6 @@
 ---
 name: obra-verification-before-completion
-description: Use before finalizing answers or PRs: confirm requirements met, run checks, and avoid “looks good” without evidence in VS Code Copilot Agent mode.
+description: Use before finalizing answers or PRs; confirm requirements met, run checks, and avoid “looks good” without evidence in VS Code Copilot Agent mode.
 ---
 
 # Verification Before Completion
