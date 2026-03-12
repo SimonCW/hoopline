@@ -1,9 +1,11 @@
 # Copilot Instructions for Hoopline
 
+## Commands to run
+- Check Justfile first to find useful commands, specific to this repository. Always prefer those!
+
 ## Build, test, and run
 
 - Build: `cargo build`
-- Lint: `cargo clippy --all-targets --all-features`
 - Run locally: `cargo run` (serves on `0.0.0.0:3000`)
 - Run all tests: `cargo test`
 - Run a single integration test: `cargo test --test integration get_root_returns_ok_and_body`
