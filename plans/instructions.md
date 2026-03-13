@@ -131,6 +131,11 @@ templates/slot_card.html - Individual slot display
 - [ ] 2.3: Seed database with test data (3 slots, 10 users, some bookings)
 - [ ] 2.4: Replace hardcoded data with database query in slot list endpoint
 
+### Local SQLite File Policy
+- Keep local SQLite files out of version control.
+- Use a non-committed path such as `tmp/hoopline.db` for local development.
+- Ensure `.gitignore` contains `*.db` (or at minimum `hoopline.db`) so local data is never pushed.
+
 ### Schema
 ```sql
 CREATE TABLE users (

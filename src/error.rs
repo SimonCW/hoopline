@@ -6,6 +6,10 @@ use axum::response::{Html, IntoResponse, Response};
 pub enum AppError {
     #[error("could not render template")]
     Render(#[from] askama::Error),
+    #[error("database error")]
+    Database(#[from] sqlx::Error),
+    #[error("migration error")]
+    Migration(#[from] sqlx::migrate::MigrateError),
 }
 
 impl IntoResponse for AppError {
@@ -17,7 +21,9 @@ impl IntoResponse for AppError {
         }
 
         let status = match &self {
-            AppError::Render(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            AppError::Render(_) | AppError::Database(_) | AppError::Migration(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
         };
         let tmpl = ErrorTemplate {
             message: self.to_string(),
