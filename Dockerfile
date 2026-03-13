@@ -23,6 +23,8 @@ WORKDIR /app
 
 COPY --from=builder /app/target/release/hoopline /usr/local/bin/hoopline
 
+ENV DATABASE_URL=sqlite:///data/hoopline.db
+
 USER appuser
 EXPOSE 3000
 

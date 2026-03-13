@@ -7,6 +7,7 @@ use askama::Template;
 use axum::{Router, extract::State, response::Html, routing::get};
 use error::AppError;
 use sqlx::SqlitePool;
+use std::path::Path;
 use tower_http::trace::TraceLayer;
 
 #[derive(Template)]
@@ -22,8 +23,13 @@ struct SlotsTemplate {
 ///
 /// Returns an error when pool initialization or migrations fail.
 pub async fn app() -> Result<Router, AppError> {
-    let database_url =
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://hoopline.db".to_string());
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        if Path::new("/data").is_dir() {
+            "sqlite:///data/hoopline.db".to_string()
+        } else {
+            "sqlite://hoopline.db".to_string()
+        }
+    });
     let pool = db::init_pool(&database_url).await?;
 
     Ok(app_with_pool(pool))

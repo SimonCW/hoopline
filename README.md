@@ -4,3 +4,12 @@
 
 Hoopline is a lightweight booking app for recurring pickup basketball slots.
 It focuses on fair waitlist handling, clear accountability, and less weekly admin work.
+
+## SQLite in production (Hostim)
+
+For production, mount a Hostim volume at `/data` and store SQLite there:
+
+- `DATABASE_URL=sqlite:///data/hoopline.db`
+- Keep local `.db` files out of git (`*.db` is ignored)
+
+This repository's Docker image now defaults `DATABASE_URL` to `/data/hoopline.db`, so with a mounted volume data persists across deploys/restarts.
