@@ -27,7 +27,7 @@ pub async fn app() -> Result<Router, AppError> {
         if Path::new("/data").is_dir() {
             "sqlite:///data/hoopline.db".to_string()
         } else {
-            "sqlite://hoopline.db".to_string()
+            "sqlite://tmp/hoopline.db".to_string()
         }
     });
     let pool = db::init_pool(&database_url).await?;
