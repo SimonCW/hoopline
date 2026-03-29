@@ -1,0 +1,44 @@
+<header id="user-selector" class="card bg-base-100 shadow-md">
+    <div class="card-body p-4 gap-3">
+        <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div>
+                <p class="text-xs uppercase tracking-wide text-base-content/60">Current user</p>
+                <p class="font-semibold">{{ current_user_label }}</p>
+            </div>
+            <form
+                class="join"
+                hx-post="/users/select"
+                hx-target="#user-selector"
+                hx-swap="outerHTML"
+            >
+                <label class="join-item btn btn-ghost cursor-default no-animation">Select</label>
+                <select class="select select-bordered join-item" name="selected_user_id">
+                    <option value="">Choose a user</option>
+                    {% for user in users %}
+                    <option value="{{ user.id }}" {% if self.is_selected(user.id) %}selected{% endif %}>
+                        {{ user.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-primary join-item">Use</button>
+            </form>
+        </div>
+
+        <form
+            class="flex flex-col sm:flex-row gap-2"
+            hx-post="/users/select"
+            hx-target="#user-selector"
+            hx-swap="outerHTML"
+        >
+            <input
+                class="input input-bordered flex-1"
+                type="text"
+                name="new_user_name"
+                maxlength="64"
+                placeholder="New user name"
+                required
+            >
+            <button type="submit" class="btn btn-secondary">Create user</button>
+        </form>
+    </div>
+</header>

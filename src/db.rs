@@ -3,7 +3,7 @@ use std::str::FromStr;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 
-use crate::models::Slot;
+use crate::models::{Slot, UserIdentity};
 
 /// Initializes a `SQLite` pool, enables foreign keys, and runs migrations.
 ///
@@ -96,6 +96,95 @@ pub async fn list_slots(pool: &SqlitePool) -> Result<Vec<Slot>, sqlx::Error> {
     }
 
     Ok(slots)
+}
+
+/// Returns all users ordered by display name.
+///
+/// # Errors
+///
+/// Returns an error when user querying or row decoding fails.
+pub async fn list_users(pool: &SqlitePool) -> Result<Vec<UserIdentity>, sqlx::Error> {
+    let rows = sqlx::query("SELECT id, name FROM users ORDER BY name ASC")
+        .fetch_all(pool)
+        .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok(UserIdentity {
+                id: row.try_get("id")?,
+                name: row.try_get("name")?,
+            })
+        })
+        .collect()
+}
+
+/// Finds a user by id.
+///
+/// # Errors
+///
+/// Returns an error when querying fails.
+pub async fn find_user_by_id(
+    pool: &SqlitePool,
+    user_id: i64,
+) -> Result<Option<UserIdentity>, sqlx::Error> {
+    let row = sqlx::query("SELECT id, name FROM users WHERE id = ?")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?;
+
+    row.map(|record| {
+        Ok(UserIdentity {
+            id: record.try_get("id")?,
+            name: record.try_get("name")?,
+        })
+    })
+    .transpose()
+}
+
+/// Finds a user by display name.
+///
+/// # Errors
+///
+/// Returns an error when querying fails.
+pub async fn find_user_by_name(
+    pool: &SqlitePool,
+    name: &str,
+) -> Result<Option<UserIdentity>, sqlx::Error> {
+    let row = sqlx::query("SELECT id, name FROM users WHERE name = ?")
+        .bind(name)
+        .fetch_optional(pool)
+        .await?;
+
+    row.map(|record| {
+        Ok(UserIdentity {
+            id: record.try_get("id")?,
+            name: record.try_get("name")?,
+        })
+    })
+    .transpose()
+}
+
+/// Creates a user with the provided display name.
+///
+/// # Errors
+///
+/// Returns an error when insertion fails.
+pub async fn create_user(pool: &SqlitePool, name: &str) -> Result<UserIdentity, sqlx::Error> {
+    sqlx::query("INSERT INTO users (name, is_admin) VALUES (?, ?)")
+        .bind(name)
+        .bind(0_i64)
+        .execute(pool)
+        .await?;
+
+    let row = sqlx::query("SELECT id, name FROM users WHERE name = ?")
+        .bind(name)
+        .fetch_one(pool)
+        .await?;
+
+    Ok(UserIdentity {
+        id: row.try_get("id")?,
+        name: row.try_get("name")?,
+    })
 }
 
 #[cfg(test)]

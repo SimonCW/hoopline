@@ -16,3 +16,9 @@ impl Slot {
         self.waitlist.get(*index).map_or("-", String::as_str)
     }
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UserIdentity {
+    pub id: i64,
+    pub name: String,
+}

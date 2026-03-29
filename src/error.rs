@@ -1,5 +1,6 @@
 use askama::Template;
 use axum::http::StatusCode;
+use axum::http::header::InvalidHeaderValue;
 use axum::response::{Html, IntoResponse, Response};
 
 #[derive(Debug, thiserror::Error)]
@@ -10,6 +11,10 @@ pub enum AppError {
     Database(#[from] sqlx::Error),
     #[error("migration error")]
     Migration(#[from] sqlx::migrate::MigrateError),
+    #[error("invalid response header value")]
+    InvalidHeaderValue(#[from] InvalidHeaderValue),
+    #[error("{0}")]
+    BadRequest(String),
 }
 
 impl IntoResponse for AppError {
@@ -24,6 +29,8 @@ impl IntoResponse for AppError {
             AppError::Render(_) | AppError::Database(_) | AppError::Migration(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
+            AppError::InvalidHeaderValue(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
         };
         let tmpl = ErrorTemplate {
             message: self.to_string(),
