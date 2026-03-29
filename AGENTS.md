@@ -6,7 +6,7 @@
 ## Build, test, and run
 
 - Build: `cargo build`
-- Run locally: `cargo run` (serves on `0.0.0.0:3000`)
+- Run locally: `cargo run` (serves on `0.0.0.0:5050`)
 - Run all tests: `cargo test`
 - Run a single integration test: `cargo test --test integration get_root_returns_ok_and_body`
 - Optional local dev loop: `bacon run` (configured in `bacon.toml` to watch `src/` and `templates/`)
@@ -40,4 +40,3 @@ _From [Microsoft Rust Guidelines](https://microsoft.github.io/rust-guidelines/):
 - **Naming:** Avoid weasel words (`Service`, `Manager`, `Factory`) that don't add meaning. `Bookings` > `BookingService`.
 - **Conversions:** Follow `as_`/`to_`/`into_` conventions. Getters don't use `get_` prefix.
 - **Common traits:** Implement `Clone`, `Debug`, `Default`, `PartialEq` where sensible. Have `Foo::new()` even if `Default` exists.
-

@@ -33,7 +33,7 @@ INSERT INTO users (id, name, is_admin) VALUES
     (7, 'Gio', 0),
     (8, 'Hana', 0),
     (9, 'Ira', 0),
-    (10, 'Jamal', 0);
+    (10, 'Jamali', 0);
 
 INSERT INTO slots (id, datetime, venue, max_players, max_waitlist) VALUES
     (1, '2026-03-09T20:00:00Z', 'Court A', 15, 5),

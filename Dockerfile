@@ -28,7 +28,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENV DATABASE_URL=sqlite:///data/hoopline.db
 
 USER root
-EXPOSE 3000
+EXPOSE 5050
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["hoopline"]

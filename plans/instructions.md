@@ -26,7 +26,7 @@ Build the **smallest deployable thing first**, then iterate. Each milestone shou
 - [x] Use `cargo-chef` planner/cook stages to speed rebuilds without changing runtime footprint
 - [x] Minimal runtime image
 - [x] Run app as non-root user
-- [x] Expose only required app port (`3000`)
+- [x] Expose only required app port (`5050`)
 - [x] Do not bake secrets into image; use Hostim environment variables
 
 ### Test Criteria
@@ -50,7 +50,7 @@ Build the **smallest deployable thing first**, then iterate. Each milestone shou
 - [x] 0.4: Add `robots.txt` with `Disallow: /`
 
 ### Test Criteria
-- **Manual:** `cargo run`, visit `http://localhost:3000`, see styled page
+- **Manual:** `cargo run`, visit `http://localhost:5050`, see styled page
 - **Auto:** Integration test that starts server, makes GET request, asserts 200 + contains expected text
 
 ### Files to Create
@@ -126,10 +126,10 @@ templates/slot_card.html - Individual slot display
 **Goal:** Store and retrieve slots/users/bookings from SQLite.
 
 ### Tasks
-- [ ] 2.1: Add SQLx with SQLite, create migration for schema
-- [ ] 2.2: Create tables: `users`, `slots`, `bookings`
-- [ ] 2.3: Seed database with test data (3 slots, 10 users, some bookings)
-- [ ] 2.4: Replace hardcoded data with database query in slot list endpoint
+- [x] 2.1: Add SQLx with SQLite, create migration for schema
+- [x] 2.2: Create tables: `users`, `slots`, `bookings`
+- [x] 2.3: Seed database with test data (3 slots, 10 users, some bookings)
+- [x] 2.4: Replace hardcoded data with database query in slot list endpoint
 
 ### Local SQLite File Policy
 - Keep local SQLite files out of version control.
