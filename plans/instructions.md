@@ -177,11 +177,11 @@ CREATE TABLE bookings (
 **Goal:** User can select their name from a dropdown, stored in cookie.
 
 ### Tasks
-- [ ] 3.1: Add endpoint `GET /users` returning all user names (JSON or HTML fragment)
-- [ ] 3.2: Add user selector dropdown in header (HTMX to load users)
-- [ ] 3.3: When user selects name, store `user_id` in cookie
-- [ ] 3.4: Display selected user name in header (or "Select your name" if none)
-- [ ] 3.5: Add "new user" flow: if name not in list, can type and create
+- [x] 3.1: Add endpoint `GET /users` returning all user names (JSON or HTML fragment)
+- [x] 3.2: Add user selector dropdown in header (HTMX to load users)
+- [x] 3.3: When user selects name, store `user_id` in cookie
+- [x] 3.4: Display selected user name in header (or "Select your name" if none)
+- [x] 3.5: Add "new user" flow: if name not in list, can type and create
 
 ### Test Criteria
 - **Manual:** 
@@ -199,11 +199,11 @@ CREATE TABLE bookings (
 **Goal:** User can sign up for a slot (or join waitlist if full).
 
 ### Tasks
-- [ ] 4.1: Add "Sign Up" button on each slot (visible only if not already signed up)
-- [ ] 4.2: `POST /slots/{id}/signup` - adds booking for current user
-- [ ] 4.3: Logic: if < 15 players, add to player list; else if < 5 waitlist, add to waitlist; else reject
-- [ ] 4.4: Return updated slot HTML fragment (HTMX replaces slot card)
-- [ ] 4.5: Show user's position in list (highlight their name)
+- [x] 4.1: Add "Sign Up" button on each slot (visible only if not already signed up)
+- [x] 4.2: `POST /slots/{id}/signup` - adds booking for current user
+- [x] 4.3: Logic: if < 15 players, add to player list; else if < 5 waitlist, add to waitlist; else reject
+- [x] 4.4: Return updated slot HTML fragment (HTMX replaces slot card)
+- [x] 4.5: Show user's position in list (highlight their name)
 
 ### Test Criteria
 - **Manual:**
@@ -222,12 +222,12 @@ CREATE TABLE bookings (
 **Goal:** User can cancel, waitlist automatically promotes.
 
 ### Tasks
-- [ ] 5.1: Add "Cancel" button next to user's own booking
-- [ ] 5.2: `POST /slots/{id}/cancel` - removes user's booking
-- [ ] 5.3: If cancelled from player list AND waitlist not empty:
+- [x] 5.1: Add "Cancel" button next to user's own booking
+- [x] 5.2: `POST /slots/{id}/cancel` - removes user's booking
+- [x] 5.3: If cancelled from player list AND waitlist not empty:
   - Promote waitlist #1 to player list
   - Shift all waitlist positions up
-- [ ] 5.4: Return updated slot HTML fragment
+- [x] 5.4: Return updated slot HTML fragment
 
 ### Test Criteria
 - **Manual:**

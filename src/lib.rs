@@ -13,7 +13,7 @@ use askama::Template;
 use axum::{
     Form, Router,
     extract::{Path, State},
-    http::{HeaderMap, HeaderValue, header},
+    http::{HeaderMap, HeaderName, HeaderValue, header},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
@@ -26,6 +26,15 @@ use tower_http::trace::TraceLayer;
 #[derive(Template)]
 #[template(path = "slots.html")]
 struct SlotsTemplate {
+    title: String,
+    current_user_label: String,
+    current_user_name: String,
+    slots: Vec<Slot>,
+}
+
+#[derive(Template)]
+#[template(path = "slots_content.html")]
+struct SlotsContentTemplate {
     title: String,
     current_user_label: String,
     current_user_name: String,
@@ -84,6 +93,7 @@ pub fn app_with_pool(pool: SqlitePool) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/slots", get(index))
+        .route("/slots/fragment", get(slots_fragment))
         .route("/slots/{slot_id}/signup", post(signup_slot))
         .route("/slots/{slot_id}/cancel", post(cancel_slot))
         .route("/users", get(users_fragment))
@@ -103,6 +113,27 @@ async fn index(
         .as_ref()
         .map_or_else(String::new, |user| user.name.clone());
     let template = SlotsTemplate {
+        title: "Hoopline".to_string(),
+        current_user_label: if current_user_name.is_empty() {
+            "Select your name".to_string()
+        } else {
+            current_user_name.clone()
+        },
+        current_user_name,
+        slots: list_slots(&pool).await?,
+    };
+    Ok(Html(template.render()?))
+}
+
+async fn slots_fragment(
+    State(pool): State<SqlitePool>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
+    let current_user = current_user_from_headers(&pool, &headers).await?;
+    let current_user_name = current_user
+        .as_ref()
+        .map_or_else(String::new, |user| user.name.clone());
+    let template = SlotsContentTemplate {
         title: "Hoopline".to_string(),
         current_user_label: if current_user_name.is_empty() {
             "Select your name".to_string()
@@ -233,6 +264,10 @@ async fn select_user(
     response.headers_mut().insert(
         header::SET_COOKIE,
         user_cookie_header_value(selected_user.id)?,
+    );
+    response.headers_mut().insert(
+        HeaderName::from_static("hx-trigger"),
+        HeaderValue::from_static("user-changed"),
     );
     Ok(response)
 }

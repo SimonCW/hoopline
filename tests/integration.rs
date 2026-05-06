@@ -50,6 +50,30 @@ async fn get_slots_returns_seeded_data() {
     let body = response_body_string(response).await;
     assert!(body.contains("Court B"));
     assert!(body.contains("Jamal"));
+    assert!(body.contains("id=\"slots-content\""));
+    assert!(body.contains("hx-trigger=\"user-changed from:body\""));
+}
+
+#[tokio::test]
+async fn get_slots_fragment_reflects_selected_user_from_cookie() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/slots/fragment")
+                .header(header::COOKIE, "user_id=1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body_string(response).await;
+    assert!(body.contains("Current user: Alex"));
+    assert!(body.contains("Cancel"));
 }
 
 #[tokio::test]
@@ -121,7 +145,15 @@ async fn post_users_select_sets_cookie_and_persists_identity() {
         .to_str()
         .unwrap()
         .to_string();
+    let hx_trigger = response
+        .headers()
+        .get("hx-trigger")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
     assert!(set_cookie.contains("user_id=2"));
+    assert_eq!(hx_trigger, "user-changed");
     let body = response_body_string(response).await;
     assert!(body.contains("Current user"));
     assert!(body.contains("Ben"));
