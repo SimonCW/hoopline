@@ -286,12 +286,12 @@ CREATE TABLE bookings (
 **Goal:** Ready for real users.
 
 ### Tasks
-- [ ] 8.1: Error handling: graceful errors, not panics
-- [ ] 8.2: Loading states (HTMX indicators)
-- [ ] 8.3: Mobile CSS polish (tap targets, readability)
-- [ ] 8.4: Dockerfile for deployment
-- [ ] 8.5: Deploy to Fly.io (or Hetzner)
-- [ ] 8.6: Set up SQLite backup strategy
+- [x] 8.1: Error handling: graceful errors, not panics
+- [x] 8.2: Loading states (HTMX indicators)
+- [x] 8.3: Mobile CSS polish (tap targets, readability)
+- [x] 8.4: Dockerfile for deployment
+- [x] 8.5: Deploy to Fly.io (or Hetzner)
+- [x] 8.6: Set up SQLite backup strategy
 
 ### Test Criteria
 - **Manual:**

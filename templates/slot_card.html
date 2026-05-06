@@ -1,21 +1,22 @@
 <article id="slot-{{ slot.id }}" class="card bg-base-100 shadow-md" data-testid="slot-card">
     <div class="card-body p-4 md:p-6">
-        <h2 class="card-title text-lg">{{ slot.datetime }}</h2>
+        <h2 class="card-title text-base sm:text-lg break-words">{{ slot.datetime }}</h2>
         <p class="text-sm text-base-content/70 mb-2">{{ slot.venue }}</p>
         <div class="mb-2">
             {% if current_user_id.is_none() %}
-            <button type="button" class="btn btn-primary btn-sm" disabled>Select your name</button>
+            <button type="button" class="btn btn-primary btn-sm min-h-10" disabled>Select your name</button>
             {% elif !slot.user_is_signed_up(current_user_id) %}
                 {% if slot.can_accept_signup() %}
                 <form
                     hx-post="/slots/{{ slot.id }}/signup"
                     hx-target="#slot-{{ slot.id }}"
                     hx-swap="outerHTML"
+                    hx-indicator="#global-loading"
                 >
-                    <button type="submit" class="btn btn-primary btn-sm">{{ slot.signup_action_label() }}</button>
+                    <button type="submit" class="btn btn-primary btn-sm min-h-10">{{ slot.signup_action_label() }}</button>
                 </form>
                 {% else %}
-                <button type="button" class="btn btn-ghost btn-sm" disabled>Slot full</button>
+                <button type="button" class="btn btn-ghost btn-sm min-h-10" disabled>Slot full</button>
                 {% endif %}
             {% endif %}
         </div>
@@ -42,16 +43,18 @@
                                     hx-post="/slots/{{ slot.id }}/cancel"
                                     hx-target="#slot-{{ slot.id }}"
                                     hx-swap="outerHTML"
+                                    hx-indicator="#global-loading"
                                 >
-                                    <button type="submit" class="btn btn-outline btn-error btn-xs">Cancel</button>
+                                    <button type="submit" class="btn btn-outline btn-error btn-sm min-h-9">Cancel</button>
                                 </form>
                                 {% elif current_user_is_admin && slot.player_has_booking(i) %}
                                 <form
                                     hx-post="/admin/slots/{{ slot.id }}/remove/{{ slot.player_user_id(i) }}"
                                     hx-target="#slot-{{ slot.id }}"
                                     hx-swap="outerHTML"
+                                    hx-indicator="#global-loading"
                                 >
-                                    <button type="submit" class="btn btn-outline btn-error btn-xs">Remove</button>
+                                    <button type="submit" class="btn btn-outline btn-error btn-sm min-h-9">Remove</button>
                                 </form>
                                 {% endif %}
                             </td>
@@ -82,24 +85,27 @@
                                     hx-post="/slots/{{ slot.id }}/cancel"
                                     hx-target="#slot-{{ slot.id }}"
                                     hx-swap="outerHTML"
+                                    hx-indicator="#global-loading"
                                 >
-                                    <button type="submit" class="btn btn-outline btn-error btn-xs">Cancel</button>
+                                    <button type="submit" class="btn btn-outline btn-error btn-sm min-h-9">Cancel</button>
                                 </form>
                                 {% elif current_user_is_admin && slot.waitlist_has_booking(i) %}
                                 <form
                                     hx-post="/admin/slots/{{ slot.id }}/remove/{{ slot.waitlist_user_id(i) }}"
                                     hx-target="#slot-{{ slot.id }}"
                                     hx-swap="outerHTML"
+                                    hx-indicator="#global-loading"
                                 >
-                                    <button type="submit" class="btn btn-outline btn-error btn-xs">Remove</button>
+                                    <button type="submit" class="btn btn-outline btn-error btn-sm min-h-9">Remove</button>
                                 </form>
                                 {% if slot.can_promote_from_waitlist() %}
                                 <form
                                     hx-post="/admin/slots/{{ slot.id }}/promote/{{ slot.waitlist_user_id(i) }}"
                                     hx-target="#slot-{{ slot.id }}"
                                     hx-swap="outerHTML"
+                                    hx-indicator="#global-loading"
                                 >
-                                    <button type="submit" class="btn btn-outline btn-primary btn-xs">Promote</button>
+                                    <button type="submit" class="btn btn-outline btn-primary btn-sm min-h-9">Promote</button>
                                 </form>
                                 {% endif %}
                                 {% endif %}

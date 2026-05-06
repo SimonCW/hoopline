@@ -6,10 +6,21 @@
     <title>{% block title %}{{ title }}{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/daisyui@5.5.16/daisyui.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.18/dist/index.global.js"></script>
+    <style>
+        .htmx-indicator {
+            display: none;
+        }
+        .htmx-request .htmx-indicator,
+        .htmx-request.htmx-indicator {
+            display: inline-flex;
+        }
+    </style>
 </head>
 <body class="bg-base-200 text-base-content" data-theme="light">
-    <main class="min-h-screen p-4">
-        <div class="max-w-6xl mx-auto space-y-6">
+    <main class="min-h-screen p-3 sm:p-4">
+        <div class="max-w-6xl mx-auto space-y-4 sm:space-y-6">
+            <div id="global-error-banner" class="alert alert-error hidden" role="alert" aria-live="polite"></div>
+            <div id="global-loading" class="htmx-indicator fixed right-3 top-3 z-50 badge badge-neutral badge-lg">Loading...</div>
             <header
                 id="user-selector"
                 class="card bg-base-100 shadow-md"
@@ -27,5 +38,32 @@
         </div>
     </main>
     <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.8/dist/htmx.min.js"></script>
+    <script>
+        (function () {
+            const banner = document.getElementById("global-error-banner");
+            if (!banner) return;
+
+            function showError(message) {
+                banner.textContent = message;
+                banner.classList.remove("hidden");
+                window.clearTimeout(showError._timer);
+                showError._timer = window.setTimeout(() => {
+                    banner.classList.add("hidden");
+                }, 6000);
+            }
+
+            document.body.addEventListener("htmx:responseError", (event) => {
+                const text = event.detail.xhr?.responseText || "Request failed. Please try again.";
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(text, "text/html");
+                const message = doc.querySelector("p")?.textContent?.trim() || "Request failed. Please try again.";
+                showError(message);
+            });
+
+            document.body.addEventListener("htmx:sendError", () => {
+                showError("Network error. Please check your connection and retry.");
+            });
+        })();
+    </script>
 </body>
 </html>

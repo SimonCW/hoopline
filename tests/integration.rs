@@ -613,3 +613,56 @@ async fn post_admin_generate_slots_creates_future_slots() {
         .get("count");
     assert!(after_count > before_count);
 }
+
+#[tokio::test]
+async fn e2e_signup_cancel_and_promotion_flow() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool.clone());
+
+    let signup_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/slots/1/signup")
+                .header(header::COOKIE, "user_id=9")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(signup_response.status(), StatusCode::OK);
+
+    let cancel_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/slots/1/cancel")
+                .header(header::COOKIE, "user_id=2")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cancel_response.status(), StatusCode::OK);
+
+    let signed_up_player =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(1_i64)
+            .bind(9_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(signed_up_player.get::<i64, _>("is_waitlist"), 0);
+    assert_eq!(signed_up_player.get::<i64, _>("position"), 6);
+
+    let promoted_waitlist_top =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(1_i64)
+            .bind(7_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(promoted_waitlist_top.get::<i64, _>("is_waitlist"), 0);
+    assert_eq!(promoted_waitlist_top.get::<i64, _>("position"), 7);
+}
