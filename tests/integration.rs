@@ -26,9 +26,15 @@ async fn get_root_returns_ok_and_body() {
     assert!(body.contains("Hoopline"));
     assert!(body.contains("Luisenschule"));
     assert!(body.contains("Alex"));
+    assert!(body.contains("Mo,"));
+    assert!(body.contains("Di,"));
+    assert!(body.contains("Do,"));
+    assert!(!body.contains(">You<"));
     assert_eq!(body.matches("data-testid=\"slot-card\"").count(), 3);
     assert_eq!(body.matches("data-testid=\"player-row\"").count(), 45);
     assert_eq!(body.matches("data-testid=\"waitlist-row\"").count(), 15);
+    assert!(body.contains("max-w-7xl"));
+    assert!(body.contains("xl:grid-cols-2"));
 }
 
 #[tokio::test]
@@ -52,6 +58,7 @@ async fn get_slots_returns_seeded_data() {
     assert!(body.contains("Jamal"));
     assert!(body.contains("id=\"slots-content\""));
     assert!(body.contains("hx-trigger=\"user-changed from:body\""));
+    assert!(body.contains("space-y-1"));
 }
 
 #[tokio::test]
@@ -263,7 +270,8 @@ async fn post_slots_signup_adds_player_and_highlights_current_user() {
     let body = response_body_string(response).await;
     assert!(body.contains("id=\"slot-3\""));
     assert!(body.contains("Farid"));
-    assert!(body.contains("You"));
+    assert!(body.contains("text-primary"));
+    assert!(!body.contains(">You<"));
 
     let booking =
         sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")

@@ -1,3 +1,5 @@
+use chrono::{DateTime, Datelike, Timelike, Utc};
+
 pub const MAX_PLAYERS: usize = 15;
 pub const MAX_WAITLIST: usize = 5;
 
@@ -13,6 +15,21 @@ pub struct Slot {
 }
 
 impl Slot {
+    pub fn datetime_label_de(&self) -> String {
+        let Some(parsed) = self.parsed_datetime() else {
+            return self.datetime.clone();
+        };
+        format!(
+            "{}, {:02}.{:02}.{:02} · {:02}:{:02}",
+            weekday_short_de(parsed.weekday()),
+            parsed.day(),
+            parsed.month(),
+            parsed.year_ce().1 % 100,
+            parsed.hour(),
+            parsed.minute()
+        )
+    }
+
     pub fn user_is_signed_up(&self, current_user_id: &Option<i64>) -> bool {
         current_user_id.is_some_and(|user_id| {
             self.player_user_ids.contains(&user_id) || self.waitlist_user_ids.contains(&user_id)
@@ -71,6 +88,24 @@ impl Slot {
             .get(*index)
             .copied()
             .unwrap_or_default()
+    }
+
+    fn parsed_datetime(&self) -> Option<DateTime<Utc>> {
+        DateTime::parse_from_rfc3339(&self.datetime)
+            .ok()
+            .map(|value| value.with_timezone(&Utc))
+    }
+}
+
+fn weekday_short_de(day: chrono::Weekday) -> &'static str {
+    match day {
+        chrono::Weekday::Mon => "Mo",
+        chrono::Weekday::Tue => "Di",
+        chrono::Weekday::Wed => "Mi",
+        chrono::Weekday::Thu => "Do",
+        chrono::Weekday::Fri => "Fr",
+        chrono::Weekday::Sat => "Sa",
+        chrono::Weekday::Sun => "So",
     }
 }
 

@@ -45,12 +45,12 @@ Capture follow-up improvements after the current MVP to make admin operations fa
 **Goal:** Make player/waitlist columns readable on real phones and ensure controls are fully visible.
 
 ### Tasks
-- [ ] R2.1: Widen player/waitlist presentation so names and action controls are not clipped.
-- [ ] R2.2: Rework slot card layout for mobile first (stacking/scroll behavior with larger tap targets).
-- [ ] R2.3: Remove the `"You"` badge text and rely on row highlighting only.
-- [ ] R2.4: Ensure action buttons (cancel/admin actions) remain fully visible at narrow widths.
-- [ ] R2.5: Add responsive breakpoints for compact, tablet, and desktop slot layouts.
-- [ ] R2.6: Format slot date/time in a human-friendly **German short style** with weekday, e.g. `Do, 05.05.26`.
+- [x] R2.1: Widen player/waitlist presentation so names and action controls are not clipped.
+- [x] R2.2: Rework slot card layout for mobile first (stacking/scroll behavior with larger tap targets).
+- [x] R2.3: Remove the `"You"` badge text and rely on row highlighting only.
+- [x] R2.4: Ensure action buttons (cancel/admin actions) remain fully visible at narrow widths.
+- [x] R2.5: Add responsive breakpoints for compact, tablet, and desktop slot layouts.
+- [x] R2.6: Format slot date/time in a human-friendly **German short style** with weekday, e.g. `Do, 05.05.26`.
 
 ### Test Criteria
 - **Manual:**
