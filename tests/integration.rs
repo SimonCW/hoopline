@@ -117,6 +117,7 @@ async fn get_users_returns_selector_fragment() {
     assert!(body.contains("id=\"user-selector\""));
     assert!(body.contains("Alex"));
     assert!(body.contains("Jamali"));
+    assert!(!body.contains("Admin mode"));
 }
 
 #[tokio::test]
@@ -173,6 +174,27 @@ async fn post_users_select_sets_cookie_and_persists_identity() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_body_string(response).await;
     assert!(body.contains("Current user: Ben"));
+}
+
+#[tokio::test]
+async fn get_users_shows_admin_badge_for_admin_cookie() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/users")
+                .header(header::COOKIE, "user_id=1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body_string(response).await;
+    assert!(body.contains("Admin mode"));
 }
 
 #[tokio::test]
@@ -433,4 +455,106 @@ async fn post_slots_cancel_shifts_waitlist_after_waitlist_cancel() {
             .unwrap();
     assert_eq!(shifted_waitlist.get::<i64, _>("is_waitlist"), 1);
     assert_eq!(shifted_waitlist.get::<i64, _>("position"), 2);
+}
+
+#[tokio::test]
+async fn post_admin_remove_rejects_non_admin() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/slots/1/remove/2")
+                .header(header::COOKIE, "user_id=2")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn post_admin_remove_triggers_waitlist_promotion() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/slots/1/remove/2")
+                .header(header::COOKIE, "user_id=1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body_string(response).await;
+    assert!(body.contains("Remove"));
+
+    let removed_count: i64 =
+        sqlx::query("SELECT COUNT(*) as count FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(1_i64)
+            .bind(2_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get("count");
+    assert_eq!(removed_count, 0);
+
+    let promoted_booking =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(1_i64)
+            .bind(7_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(promoted_booking.get::<i64, _>("is_waitlist"), 0);
+    assert_eq!(promoted_booking.get::<i64, _>("position"), 6);
+}
+
+#[tokio::test]
+async fn post_admin_promote_moves_target_from_waitlist_to_players() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/slots/3/promote/4")
+                .header(header::COOKIE, "user_id=1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let promoted =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(3_i64)
+            .bind(4_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(promoted.get::<i64, _>("is_waitlist"), 0);
+    assert_eq!(promoted.get::<i64, _>("position"), 6);
+
+    let shifted =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(3_i64)
+            .bind(5_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(shifted.get::<i64, _>("is_waitlist"), 1);
+    assert_eq!(shifted.get::<i64, _>("position"), 2);
 }

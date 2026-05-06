@@ -15,6 +15,8 @@ pub enum AppError {
     InvalidHeaderValue(#[from] InvalidHeaderValue),
     #[error("{0}")]
     BadRequest(String),
+    #[error("{0}")]
+    Forbidden(String),
 }
 
 impl IntoResponse for AppError {
@@ -31,6 +33,7 @@ impl IntoResponse for AppError {
             }
             AppError::InvalidHeaderValue(_) => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            AppError::Forbidden(_) => StatusCode::FORBIDDEN,
         };
         let tmpl = ErrorTemplate {
             message: self.to_string(),

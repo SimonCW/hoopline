@@ -21,6 +21,14 @@ pub enum CancelOutcome {
     SlotNotFound,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PromoteOutcome {
+    Promoted,
+    NotWaitlisted,
+    PlayerListFull,
+    SlotNotFound,
+}
+
 /// Initializes a `SQLite` pool, enables foreign keys, and runs migrations.
 ///
 /// # Errors
@@ -65,6 +73,7 @@ pub async fn list_slots(pool: &SqlitePool) -> Result<Vec<Slot>, sqlx::Error> {
             s.datetime,
             s.venue,
             b.is_waitlist,
+            b.user_id,
             u.name
         FROM slots s
         LEFT JOIN bookings b ON b.slot_id = s.id
@@ -91,6 +100,7 @@ pub async fn find_slot(pool: &SqlitePool, slot_id: i64) -> Result<Option<Slot>, 
             s.datetime,
             s.venue,
             b.is_waitlist,
+            b.user_id,
             u.name
         FROM slots s
         LEFT JOIN bookings b ON b.slot_id = s.id
@@ -286,6 +296,81 @@ pub async fn cancel_booking_for_slot(
     Ok(CancelOutcome::Cancelled)
 }
 
+/// Promotes a waitlisted user into the player list.
+///
+/// # Errors
+///
+/// Returns an error when querying or writing booking data fails.
+pub async fn promote_waitlist_user(
+    pool: &SqlitePool,
+    slot_id: i64,
+    user_id: i64,
+) -> Result<PromoteOutcome, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let slot = sqlx::query("SELECT max_players FROM slots WHERE id = ?")
+        .bind(slot_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let Some(slot) = slot else {
+        return Ok(PromoteOutcome::SlotNotFound);
+    };
+    let max_players: i64 = slot.try_get("max_players")?;
+
+    let player_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM bookings WHERE slot_id = ? AND is_waitlist = 0")
+            .bind(slot_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if player_count >= max_players {
+        return Ok(PromoteOutcome::PlayerListFull);
+    }
+
+    let waitlist_booking = sqlx::query(
+        "SELECT id, position
+         FROM bookings
+         WHERE slot_id = ? AND user_id = ? AND is_waitlist = 1",
+    )
+    .bind(slot_id)
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(waitlist_booking) = waitlist_booking else {
+        return Ok(PromoteOutcome::NotWaitlisted);
+    };
+    let booking_id: i64 = waitlist_booking.try_get("id")?;
+    let old_waitlist_position: i64 = waitlist_booking.try_get("position")?;
+
+    let next_player_position: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(position), 0) + 1 FROM bookings WHERE slot_id = ? AND is_waitlist = 0",
+    )
+    .bind(slot_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "UPDATE bookings
+         SET is_waitlist = 0, position = ?
+         WHERE id = ?",
+    )
+    .bind(next_player_position)
+    .bind(booking_id)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "UPDATE bookings
+         SET position = position - 1
+         WHERE slot_id = ? AND is_waitlist = 1 AND position > ?",
+    )
+    .bind(slot_id)
+    .bind(old_waitlist_position)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(PromoteOutcome::Promoted)
+}
+
 fn slots_from_rows(rows: Vec<SqliteRow>) -> Result<Vec<Slot>, sqlx::Error> {
     let mut slots = Vec::new();
     let mut current_slot: Option<Slot> = None;
@@ -302,18 +387,23 @@ fn slots_from_rows(rows: Vec<SqliteRow>) -> Result<Vec<Slot>, sqlx::Error> {
                 datetime: row.get("datetime"),
                 venue: row.get("venue"),
                 players: Vec::new(),
+                player_user_ids: Vec::new(),
                 waitlist: Vec::new(),
+                waitlist_user_ids: Vec::new(),
             });
         }
 
         let maybe_name: Option<String> = row.try_get("name")?;
         if let Some(name) = maybe_name {
             let is_waitlist: i64 = row.get("is_waitlist");
+            let user_id: i64 = row.get("user_id");
             if let Some(slot) = current_slot.as_mut() {
                 if is_waitlist == 1 {
                     slot.waitlist.push(name);
+                    slot.waitlist_user_ids.push(user_id);
                 } else {
                     slot.players.push(name);
+                    slot.player_user_ids.push(user_id);
                 }
             }
         }
@@ -332,7 +422,7 @@ fn slots_from_rows(rows: Vec<SqliteRow>) -> Result<Vec<Slot>, sqlx::Error> {
 ///
 /// Returns an error when user querying or row decoding fails.
 pub async fn list_users(pool: &SqlitePool) -> Result<Vec<UserIdentity>, sqlx::Error> {
-    let rows = sqlx::query("SELECT id, name FROM users ORDER BY name ASC")
+    let rows = sqlx::query("SELECT id, name, is_admin FROM users ORDER BY name ASC")
         .fetch_all(pool)
         .await?;
 
@@ -341,6 +431,7 @@ pub async fn list_users(pool: &SqlitePool) -> Result<Vec<UserIdentity>, sqlx::Er
             Ok(UserIdentity {
                 id: row.try_get("id")?,
                 name: row.try_get("name")?,
+                is_admin: row.try_get::<i64, _>("is_admin")? == 1,
             })
         })
         .collect()
@@ -355,7 +446,7 @@ pub async fn find_user_by_id(
     pool: &SqlitePool,
     user_id: i64,
 ) -> Result<Option<UserIdentity>, sqlx::Error> {
-    let row = sqlx::query("SELECT id, name FROM users WHERE id = ?")
+    let row = sqlx::query("SELECT id, name, is_admin FROM users WHERE id = ?")
         .bind(user_id)
         .fetch_optional(pool)
         .await?;
@@ -364,6 +455,7 @@ pub async fn find_user_by_id(
         Ok(UserIdentity {
             id: record.try_get("id")?,
             name: record.try_get("name")?,
+            is_admin: record.try_get::<i64, _>("is_admin")? == 1,
         })
     })
     .transpose()
@@ -378,7 +470,7 @@ pub async fn find_user_by_name(
     pool: &SqlitePool,
     name: &str,
 ) -> Result<Option<UserIdentity>, sqlx::Error> {
-    let row = sqlx::query("SELECT id, name FROM users WHERE name = ?")
+    let row = sqlx::query("SELECT id, name, is_admin FROM users WHERE name = ?")
         .bind(name)
         .fetch_optional(pool)
         .await?;
@@ -387,6 +479,7 @@ pub async fn find_user_by_name(
         Ok(UserIdentity {
             id: record.try_get("id")?,
             name: record.try_get("name")?,
+            is_admin: record.try_get::<i64, _>("is_admin")? == 1,
         })
     })
     .transpose()
@@ -404,7 +497,7 @@ pub async fn create_user(pool: &SqlitePool, name: &str) -> Result<UserIdentity, 
         .execute(pool)
         .await?;
 
-    let row = sqlx::query("SELECT id, name FROM users WHERE name = ?")
+    let row = sqlx::query("SELECT id, name, is_admin FROM users WHERE name = ?")
         .bind(name)
         .fetch_one(pool)
         .await?;
@@ -412,6 +505,7 @@ pub async fn create_user(pool: &SqlitePool, name: &str) -> Result<UserIdentity, 
     Ok(UserIdentity {
         id: row.try_get("id")?,
         name: row.try_get("name")?,
+        is_admin: row.try_get::<i64, _>("is_admin")? == 1,
     })
 }
 

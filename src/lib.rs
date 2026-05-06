@@ -4,8 +4,9 @@ pub mod models;
 
 use crate::{
     db::{
-        CancelOutcome, SignupOutcome, cancel_booking_for_slot, create_user, find_slot,
-        find_user_by_id, find_user_by_name, list_slots, list_users, signup_for_slot,
+        CancelOutcome, PromoteOutcome, SignupOutcome, cancel_booking_for_slot, create_user,
+        find_slot, find_user_by_id, find_user_by_name, list_slots, list_users,
+        promote_waitlist_user, signup_for_slot,
     },
     models::{Slot, UserIdentity},
 };
@@ -28,7 +29,8 @@ use tower_http::trace::TraceLayer;
 struct SlotsTemplate {
     title: String,
     current_user_label: String,
-    current_user_name: String,
+    current_user_id: Option<i64>,
+    current_user_is_admin: bool,
     slots: Vec<Slot>,
 }
 
@@ -37,7 +39,8 @@ struct SlotsTemplate {
 struct SlotsContentTemplate {
     title: String,
     current_user_label: String,
-    current_user_name: String,
+    current_user_id: Option<i64>,
+    current_user_is_admin: bool,
     slots: Vec<Slot>,
 }
 
@@ -45,7 +48,8 @@ struct SlotsContentTemplate {
 #[template(path = "slot_card.html")]
 struct SlotCardTemplate {
     slot: Slot,
-    current_user_name: String,
+    current_user_id: Option<i64>,
+    current_user_is_admin: bool,
 }
 
 #[derive(Template)]
@@ -54,6 +58,7 @@ struct UserSelectorTemplate {
     users: Vec<UserIdentity>,
     selected_user_id: Option<i64>,
     current_user_label: String,
+    current_user_is_admin: bool,
 }
 
 impl UserSelectorTemplate {
@@ -96,6 +101,14 @@ pub fn app_with_pool(pool: SqlitePool) -> Router {
         .route("/slots/fragment", get(slots_fragment))
         .route("/slots/{slot_id}/signup", post(signup_slot))
         .route("/slots/{slot_id}/cancel", post(cancel_slot))
+        .route(
+            "/admin/slots/{slot_id}/remove/{user_id}",
+            post(admin_remove_slot_user),
+        )
+        .route(
+            "/admin/slots/{slot_id}/promote/{user_id}",
+            post(admin_promote_waitlist_user),
+        )
         .route("/users", get(users_fragment))
         .route("/users/select", post(select_user))
         .route("/healthz", get(healthz))
@@ -109,17 +122,15 @@ async fn index(
     headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
     let current_user = current_user_from_headers(&pool, &headers).await?;
-    let current_user_name = current_user
-        .as_ref()
-        .map_or_else(String::new, |user| user.name.clone());
+    let current_user_id = current_user.as_ref().map(|user| user.id);
+    let current_user_is_admin = current_user.as_ref().is_some_and(|user| user.is_admin);
     let template = SlotsTemplate {
         title: "Hoopline".to_string(),
-        current_user_label: if current_user_name.is_empty() {
-            "Select your name".to_string()
-        } else {
-            current_user_name.clone()
-        },
-        current_user_name,
+        current_user_label: current_user
+            .as_ref()
+            .map_or_else(|| "Select your name".to_string(), |user| user.name.clone()),
+        current_user_id,
+        current_user_is_admin,
         slots: list_slots(&pool).await?,
     };
     Ok(Html(template.render()?))
@@ -130,17 +141,15 @@ async fn slots_fragment(
     headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
     let current_user = current_user_from_headers(&pool, &headers).await?;
-    let current_user_name = current_user
-        .as_ref()
-        .map_or_else(String::new, |user| user.name.clone());
+    let current_user_id = current_user.as_ref().map(|user| user.id);
+    let current_user_is_admin = current_user.as_ref().is_some_and(|user| user.is_admin);
     let template = SlotsContentTemplate {
         title: "Hoopline".to_string(),
-        current_user_label: if current_user_name.is_empty() {
-            "Select your name".to_string()
-        } else {
-            current_user_name.clone()
-        },
-        current_user_name,
+        current_user_label: current_user
+            .as_ref()
+            .map_or_else(|| "Select your name".to_string(), |user| user.name.clone()),
+        current_user_id,
+        current_user_is_admin,
         slots: list_slots(&pool).await?,
     };
     Ok(Html(template.render()?))
@@ -177,7 +186,8 @@ async fn signup_slot(
         .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
     let template = SlotCardTemplate {
         slot,
-        current_user_name: current_user.name,
+        current_user_id: Some(current_user.id),
+        current_user_is_admin: current_user.is_admin,
     };
     Ok(Html(template.render()?))
 }
@@ -208,7 +218,73 @@ async fn cancel_slot(
         .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
     let template = SlotCardTemplate {
         slot,
-        current_user_name: current_user.name,
+        current_user_id: Some(current_user.id),
+        current_user_is_admin: current_user.is_admin,
+    };
+    Ok(Html(template.render()?))
+}
+
+async fn admin_remove_slot_user(
+    State(pool): State<SqlitePool>,
+    Path((slot_id, user_id)): Path<(i64, i64)>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
+    let current_user = current_admin_from_headers(&pool, &headers).await?;
+
+    match cancel_booking_for_slot(&pool, slot_id, user_id).await? {
+        CancelOutcome::Cancelled => {}
+        CancelOutcome::NotSignedUp => {
+            return Err(AppError::BadRequest(
+                "target user is not signed up for this slot".to_string(),
+            ));
+        }
+        CancelOutcome::SlotNotFound => {
+            return Err(AppError::BadRequest("slot does not exist".to_string()));
+        }
+    }
+
+    let slot = find_slot(&pool, slot_id)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
+    let template = SlotCardTemplate {
+        slot,
+        current_user_id: Some(current_user.id),
+        current_user_is_admin: true,
+    };
+    Ok(Html(template.render()?))
+}
+
+async fn admin_promote_waitlist_user(
+    State(pool): State<SqlitePool>,
+    Path((slot_id, user_id)): Path<(i64, i64)>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
+    let current_user = current_admin_from_headers(&pool, &headers).await?;
+
+    match promote_waitlist_user(&pool, slot_id, user_id).await? {
+        PromoteOutcome::Promoted => {}
+        PromoteOutcome::NotWaitlisted => {
+            return Err(AppError::BadRequest(
+                "target user is not on this waitlist".to_string(),
+            ));
+        }
+        PromoteOutcome::PlayerListFull => {
+            return Err(AppError::BadRequest(
+                "player list is full; remove a player first".to_string(),
+            ));
+        }
+        PromoteOutcome::SlotNotFound => {
+            return Err(AppError::BadRequest("slot does not exist".to_string()));
+        }
+    }
+
+    let slot = find_slot(&pool, slot_id)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
+    let template = SlotCardTemplate {
+        slot,
+        current_user_id: Some(current_user.id),
+        current_user_is_admin: true,
     };
     Ok(Html(template.render()?))
 }
@@ -219,12 +295,14 @@ async fn users_fragment(
 ) -> Result<Html<String>, AppError> {
     let current_user = current_user_from_headers(&pool, &headers).await?;
     let selected_user_id = current_user.as_ref().map(|user| user.id);
-    let current_user_label =
-        current_user.map_or_else(|| "Select your name".to_string(), |user| user.name);
+    let current_user_label = current_user
+        .as_ref()
+        .map_or_else(|| "Select your name".to_string(), |user| user.name.clone());
     let template = UserSelectorTemplate {
         users: list_users(&pool).await?,
         selected_user_id,
         current_user_label,
+        current_user_is_admin: current_user.as_ref().is_some_and(|user| user.is_admin),
     };
     Ok(Html(template.render()?))
 }
@@ -259,6 +337,7 @@ async fn select_user(
         users: list_users(&pool).await?,
         selected_user_id: Some(selected_user.id),
         current_user_label: selected_user.name.clone(),
+        current_user_is_admin: selected_user.is_admin,
     };
     let mut response = Html(template.render()?).into_response();
     response.headers_mut().insert(
@@ -288,6 +367,19 @@ async fn current_user_from_headers(
         return find_user_by_id(pool, user_id).await.map_err(AppError::from);
     }
     Ok(None)
+}
+
+async fn current_admin_from_headers(
+    pool: &SqlitePool,
+    headers: &HeaderMap,
+) -> Result<UserIdentity, AppError> {
+    let current_user = current_user_from_headers(pool, headers)
+        .await?
+        .ok_or_else(|| AppError::Forbidden("admin access required".to_string()))?;
+    if !current_user.is_admin {
+        return Err(AppError::Forbidden("admin access required".to_string()));
+    }
+    Ok(current_user)
 }
 
 fn user_id_from_cookie(headers: &HeaderMap) -> Option<i64> {
