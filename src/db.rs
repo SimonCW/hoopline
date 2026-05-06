@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use chrono::{DateTime, Datelike, Days, Utc};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
 
@@ -27,6 +28,15 @@ pub enum PromoteOutcome {
     NotWaitlisted,
     PlayerListFull,
     SlotNotFound,
+}
+
+#[derive(Clone, Debug)]
+struct SlotSchedule {
+    weekday: i64,
+    time_utc: String,
+    venue: String,
+    max_players: i64,
+    max_waitlist: i64,
 }
 
 /// Initializes a `SQLite` pool, enables foreign keys, and runs migrations.
@@ -58,6 +68,51 @@ pub async fn init_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
     sqlx::migrate!("./migrations").run(&pool).await?;
 
     Ok(pool)
+}
+
+/// Creates slots for the next 14 days from configured schedules.
+///
+/// # Errors
+///
+/// Returns an error when schedule or slot write queries fail.
+pub async fn create_upcoming_slots(
+    pool: &SqlitePool,
+    now: DateTime<Utc>,
+) -> Result<i64, sqlx::Error> {
+    let schedules = list_active_slot_schedules(pool).await?;
+    if schedules.is_empty() {
+        return Ok(0);
+    }
+
+    let mut tx = pool.begin().await?;
+    let mut created_count = 0_i64;
+    let start_date = now.date_naive();
+
+    for day_offset in 0_u64..14 {
+        let Some(target_date) = start_date.checked_add_days(Days::new(day_offset)) else {
+            continue;
+        };
+        let target_weekday = weekday_to_number(target_date.weekday());
+        for schedule in &schedules {
+            if schedule.weekday != target_weekday {
+                continue;
+            }
+            let datetime = format!("{target_date}T{}:00Z", schedule.time_utc);
+            let result = sqlx::query(
+                "INSERT OR IGNORE INTO slots (datetime, venue, max_players, max_waitlist) VALUES (?, ?, ?, ?)",
+            )
+            .bind(datetime)
+            .bind(&schedule.venue)
+            .bind(schedule.max_players)
+            .bind(schedule.max_waitlist)
+            .execute(&mut *tx)
+            .await?;
+            created_count += i64::try_from(result.rows_affected()).unwrap_or_default();
+        }
+    }
+
+    tx.commit().await?;
+    Ok(created_count)
 }
 
 /// Returns slots with booking names split into players and waitlist.
@@ -371,6 +426,40 @@ pub async fn promote_waitlist_user(
     Ok(PromoteOutcome::Promoted)
 }
 
+async fn list_active_slot_schedules(pool: &SqlitePool) -> Result<Vec<SlotSchedule>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT weekday, time_utc, venue, max_players, max_waitlist
+         FROM slot_schedules
+         WHERE is_active = 1",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok(SlotSchedule {
+                weekday: row.try_get("weekday")?,
+                time_utc: row.try_get("time_utc")?,
+                venue: row.try_get("venue")?,
+                max_players: row.try_get("max_players")?,
+                max_waitlist: row.try_get("max_waitlist")?,
+            })
+        })
+        .collect()
+}
+
+fn weekday_to_number(weekday: chrono::Weekday) -> i64 {
+    match weekday {
+        chrono::Weekday::Mon => 1,
+        chrono::Weekday::Tue => 2,
+        chrono::Weekday::Wed => 3,
+        chrono::Weekday::Thu => 4,
+        chrono::Weekday::Fri => 5,
+        chrono::Weekday::Sat => 6,
+        chrono::Weekday::Sun => 7,
+    }
+}
+
 fn slots_from_rows(rows: Vec<SqliteRow>) -> Result<Vec<Slot>, sqlx::Error> {
     let mut slots = Vec::new();
     let mut current_slot: Option<Slot> = None;
@@ -511,9 +600,10 @@ pub async fn create_user(pool: &SqlitePool, name: &str) -> Result<UserIdentity, 
 
 #[cfg(test)]
 mod tests {
+    use chrono::{TimeZone, Utc};
     use sqlx::Row;
 
-    use super::init_pool;
+    use super::{create_upcoming_slots, init_pool};
 
     #[tokio::test]
     async fn insert_and_query_users_slots_and_bookings() {
@@ -573,5 +663,26 @@ mod tests {
                 .get("count");
 
         assert_eq!(booking_count, 1);
+    }
+
+    #[tokio::test]
+    async fn create_upcoming_slots_is_idempotent() {
+        let pool = init_pool("sqlite::memory:")
+            .await
+            .expect("in-memory db should initialize");
+        let now = Utc
+            .with_ymd_and_hms(2030, 1, 1, 0, 0, 0)
+            .single()
+            .expect("valid test date");
+
+        let first_created = create_upcoming_slots(&pool, now)
+            .await
+            .expect("first generation should succeed");
+        assert!(first_created > 0);
+
+        let second_created = create_upcoming_slots(&pool, now)
+            .await
+            .expect("second generation should succeed");
+        assert_eq!(second_created, 0);
     }
 }

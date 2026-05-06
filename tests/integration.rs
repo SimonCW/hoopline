@@ -558,3 +558,58 @@ async fn post_admin_promote_moves_target_from_waitlist_to_players() {
     assert_eq!(shifted.get::<i64, _>("is_waitlist"), 1);
     assert_eq!(shifted.get::<i64, _>("position"), 2);
 }
+
+#[tokio::test]
+async fn post_admin_generate_slots_rejects_non_admin() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/slots/generate")
+                .header(header::COOKIE, "user_id=2")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn post_admin_generate_slots_creates_future_slots() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool.clone());
+
+    let before_count: i64 = sqlx::query("SELECT COUNT(*) as count FROM slots")
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get("count");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/slots/generate")
+                .header(header::COOKIE, "user_id=1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body_string(response).await;
+    assert!(body.contains("id=\"slots-content\""));
+
+    let after_count: i64 = sqlx::query("SELECT COUNT(*) as count FROM slots")
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get("count");
+    assert!(after_count > before_count);
+}

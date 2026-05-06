@@ -245,11 +245,11 @@ CREATE TABLE bookings (
 **Goal:** Admin can move/remove any player.
 
 ### Tasks
-- [ ] 6.1: Check `is_admin` flag from user's cookie
-- [ ] 6.2: Admin sees "Remove" button on all players (not just self)
-- [ ] 6.3: `POST /admin/slots/{id}/remove/{user_id}` - admin removes player
-- [ ] 6.4: Admin can manually promote from waitlist (button next to waitlist names)
-- [ ] 6.5: Simple admin indicator in UI (e.g., "Admin mode" badge)
+- [x] 6.1: Check `is_admin` flag from user's cookie
+- [x] 6.2: Admin sees "Remove" button on all players (not just self)
+- [x] 6.3: `POST /admin/slots/{id}/remove/{user_id}` - admin removes player
+- [x] 6.4: Admin can manually promote from waitlist (button next to waitlist names)
+- [x] 6.5: Simple admin indicator in UI (e.g., "Admin mode" badge)
 
 ### Test Criteria
 - **Manual:**
@@ -266,10 +266,10 @@ CREATE TABLE bookings (
 **Goal:** Slots automatically created on schedule.
 
 ### Tasks
-- [ ] 7.1: Store slot schedule config (Mon 20:00 @ Venue A, Tue 20:00 @ Venue B, etc.)
-- [ ] 7.2: Endpoint or cron job: create slots for next 2 weeks if not exist
-- [ ] 7.3: Run on startup + can be triggered manually by admin
-- [ ] 7.4: Skip slot creation for dates that already have a slot
+- [x] 7.1: Store slot schedule config (Mon 20:00 @ Venue A, Tue 20:00 @ Venue B, etc.)
+- [x] 7.2: Endpoint or cron job: create slots for next 2 weeks if not exist
+- [x] 7.3: Run on startup + can be triggered manually by admin
+- [x] 7.4: Skip slot creation for dates that already have a slot
 
 ### Test Criteria
 - **Manual:**

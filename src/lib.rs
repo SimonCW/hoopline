@@ -4,9 +4,9 @@ pub mod models;
 
 use crate::{
     db::{
-        CancelOutcome, PromoteOutcome, SignupOutcome, cancel_booking_for_slot, create_user,
-        find_slot, find_user_by_id, find_user_by_name, list_slots, list_users,
-        promote_waitlist_user, signup_for_slot,
+        CancelOutcome, PromoteOutcome, SignupOutcome, cancel_booking_for_slot,
+        create_upcoming_slots, create_user, find_slot, find_user_by_id, find_user_by_name,
+        list_slots, list_users, promote_waitlist_user, signup_for_slot,
     },
     models::{Slot, UserIdentity},
 };
@@ -18,6 +18,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
+use chrono::Utc;
 use error::AppError;
 use serde::Deserialize;
 use sqlx::SqlitePool;
@@ -90,6 +91,7 @@ pub async fn app() -> Result<Router, AppError> {
         }
     });
     let pool = db::init_pool(&database_url).await?;
+    create_upcoming_slots(&pool, Utc::now()).await?;
 
     Ok(app_with_pool(pool))
 }
@@ -109,6 +111,7 @@ pub fn app_with_pool(pool: SqlitePool) -> Router {
             "/admin/slots/{slot_id}/promote/{user_id}",
             post(admin_promote_waitlist_user),
         )
+        .route("/admin/slots/generate", post(admin_generate_slots))
         .route("/users", get(users_fragment))
         .route("/users/select", post(select_user))
         .route("/healthz", get(healthz))
@@ -285,6 +288,22 @@ async fn admin_promote_waitlist_user(
         slot,
         current_user_id: Some(current_user.id),
         current_user_is_admin: true,
+    };
+    Ok(Html(template.render()?))
+}
+
+async fn admin_generate_slots(
+    State(pool): State<SqlitePool>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
+    let current_user = current_admin_from_headers(&pool, &headers).await?;
+    create_upcoming_slots(&pool, Utc::now()).await?;
+    let template = SlotsContentTemplate {
+        title: "Hoopline".to_string(),
+        current_user_label: current_user.name.clone(),
+        current_user_id: Some(current_user.id),
+        current_user_is_admin: true,
+        slots: list_slots(&pool).await?,
     };
     Ok(Html(template.render()?))
 }

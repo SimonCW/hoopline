@@ -45,5 +45,15 @@
             >
             <button type="submit" class="btn btn-secondary">Create user</button>
         </form>
+
+        {% if current_user_is_admin %}
+        <form
+            hx-post="/admin/slots/generate"
+            hx-target="#slots-content"
+            hx-swap="outerHTML"
+        >
+            <button type="submit" class="btn btn-outline btn-primary btn-sm">Generate next 2 weeks</button>
+        </form>
+        {% endif %}
     </div>
 </header>
