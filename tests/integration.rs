@@ -11,6 +11,23 @@ async fn response_body_string(response: axum::response::Response) -> String {
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
+async fn insert_waitlist_booking(
+    pool: &sqlx::SqlitePool,
+    slot_id: i64,
+    user_id: i64,
+    position: i64,
+) {
+    sqlx::query(
+        "INSERT INTO bookings (slot_id, user_id, position, is_waitlist) VALUES (?, ?, ?, 1)",
+    )
+    .bind(slot_id)
+    .bind(user_id)
+    .bind(position)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 #[tokio::test]
 async fn get_root_returns_ok_and_body() {
     let pool = db::init_pool("sqlite::memory:").await.unwrap();
@@ -316,7 +333,7 @@ async fn post_slots_signup_routes_to_waitlist_when_players_are_full() {
             .await
             .unwrap();
     assert_eq!(booking.get::<i64, _>("is_waitlist"), 1);
-    assert_eq!(booking.get::<i64, _>("position"), 2);
+    assert_eq!(booking.get::<i64, _>("position"), 1);
 }
 
 #[tokio::test]
@@ -329,6 +346,7 @@ async fn post_slots_signup_rejects_when_slot_and_waitlist_are_full() {
         .execute(&pool)
         .await
         .unwrap();
+    insert_waitlist_booking(&pool, 2, 7, 1).await;
     let app = app_with_pool(pool.clone());
 
     let response = app
@@ -378,6 +396,14 @@ async fn post_slots_signup_rejects_duplicate_user() {
 #[tokio::test]
 async fn post_slots_cancel_promotes_waitlist_after_player_cancel() {
     let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    sqlx::query("UPDATE slots SET max_players = ? WHERE id = ?")
+        .bind(6_i64)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+    insert_waitlist_booking(&pool, 1, 7, 1).await;
+    insert_waitlist_booking(&pool, 1, 8, 2).await;
     let app = app_with_pool(pool.clone());
 
     let response = app
@@ -428,6 +454,15 @@ async fn post_slots_cancel_promotes_waitlist_after_player_cancel() {
 #[tokio::test]
 async fn post_slots_cancel_shifts_waitlist_after_waitlist_cancel() {
     let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    sqlx::query("UPDATE slots SET max_players = ? WHERE id = ?")
+        .bind(5_i64)
+        .bind(3_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+    insert_waitlist_booking(&pool, 3, 3, 1).await;
+    insert_waitlist_booking(&pool, 3, 4, 2).await;
+    insert_waitlist_booking(&pool, 3, 5, 3).await;
     let app = app_with_pool(pool.clone());
 
     let response = app
@@ -488,6 +523,13 @@ async fn post_admin_remove_rejects_non_admin() {
 #[tokio::test]
 async fn post_admin_remove_triggers_waitlist_promotion() {
     let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    sqlx::query("UPDATE slots SET max_players = ? WHERE id = ?")
+        .bind(6_i64)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+    insert_waitlist_booking(&pool, 1, 7, 1).await;
     let app = app_with_pool(pool.clone());
 
     let response = app
@@ -530,6 +572,14 @@ async fn post_admin_remove_triggers_waitlist_promotion() {
 #[tokio::test]
 async fn post_admin_promote_moves_target_from_waitlist_to_players() {
     let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    sqlx::query("UPDATE slots SET max_players = ? WHERE id = ?")
+        .bind(6_i64)
+        .bind(3_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+    insert_waitlist_booking(&pool, 3, 4, 1).await;
+    insert_waitlist_booking(&pool, 3, 5, 2).await;
     let app = app_with_pool(pool.clone());
 
     let response = app
@@ -564,7 +614,7 @@ async fn post_admin_promote_moves_target_from_waitlist_to_players() {
             .await
             .unwrap();
     assert_eq!(shifted.get::<i64, _>("is_waitlist"), 1);
-    assert_eq!(shifted.get::<i64, _>("position"), 2);
+    assert_eq!(shifted.get::<i64, _>("position"), 1);
 }
 
 #[tokio::test]
@@ -625,6 +675,13 @@ async fn post_admin_generate_slots_creates_future_slots() {
 #[tokio::test]
 async fn e2e_signup_cancel_and_promotion_flow() {
     let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    sqlx::query("UPDATE slots SET max_players = ? WHERE id = ?")
+        .bind(7_i64)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+    insert_waitlist_booking(&pool, 1, 7, 1).await;
     let app = app_with_pool(pool.clone());
 
     let signup_response = app
