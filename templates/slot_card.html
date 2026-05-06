@@ -1,19 +1,52 @@
-<article class="card bg-base-100 shadow-md" data-testid="slot-card">
+<article id="slot-{{ slot.id }}" class="card bg-base-100 shadow-md" data-testid="slot-card">
     <div class="card-body p-4 md:p-6">
         <h2 class="card-title text-lg">{{ slot.datetime }}</h2>
         <p class="text-sm text-base-content/70 mb-2">{{ slot.venue }}</p>
+        <div class="mb-2">
+            {% if current_user_name.is_empty() %}
+            <button type="button" class="btn btn-primary btn-sm" disabled>Select your name</button>
+            {% elif !slot.user_is_signed_up(current_user_name) %}
+                {% if slot.can_accept_signup() %}
+                <form
+                    hx-post="/slots/{{ slot.id }}/signup"
+                    hx-target="#slot-{{ slot.id }}"
+                    hx-swap="outerHTML"
+                >
+                    <button type="submit" class="btn btn-primary btn-sm">{{ slot.signup_action_label() }}</button>
+                </form>
+                {% else %}
+                <button type="button" class="btn btn-ghost btn-sm" disabled>Slot full</button>
+                {% endif %}
+            {% endif %}
+        </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="overflow-x-auto">
                 <h3 class="font-semibold mb-2">Players</h3>
                 <table class="table table-zebra table-sm">
                     <thead>
-                        <tr><th>#</th><th>Name</th></tr>
+                        <tr><th>#</th><th>Name</th><th></th></tr>
                     </thead>
                     <tbody>
                         {% for i in 0..15 %}
-                        <tr data-testid="player-row">
+                        <tr data-testid="player-row" {% if slot.player_is_current_user(i, current_user_name) %}class="font-semibold text-primary"{% endif %}>
                             <td>{{ loop.index }}</td>
-                            <td>{{ slot.player_name(i) }}</td>
+                            <td>
+                                {{ slot.player_name(i) }}
+                                {% if slot.player_is_current_user(i, current_user_name) %}
+                                <span class="badge badge-outline badge-primary ml-1">You</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-right">
+                                {% if slot.player_is_current_user(i, current_user_name) %}
+                                <form
+                                    hx-post="/slots/{{ slot.id }}/cancel"
+                                    hx-target="#slot-{{ slot.id }}"
+                                    hx-swap="outerHTML"
+                                >
+                                    <button type="submit" class="btn btn-outline btn-error btn-xs">Cancel</button>
+                                </form>
+                                {% endif %}
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -23,13 +56,29 @@
                 <h3 class="font-semibold mb-2">Waitlist</h3>
                 <table class="table table-zebra table-sm">
                     <thead>
-                        <tr><th>#</th><th>Name</th></tr>
+                        <tr><th>#</th><th>Name</th><th></th></tr>
                     </thead>
                     <tbody>
                         {% for i in 0..5 %}
-                        <tr data-testid="waitlist-row">
+                        <tr data-testid="waitlist-row" {% if slot.waitlist_is_current_user(i, current_user_name) %}class="font-semibold text-primary"{% endif %}>
                             <td>{{ loop.index }}</td>
-                            <td>{{ slot.waitlist_name(i) }}</td>
+                            <td>
+                                {{ slot.waitlist_name(i) }}
+                                {% if slot.waitlist_is_current_user(i, current_user_name) %}
+                                <span class="badge badge-outline badge-primary ml-1">You</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-right">
+                                {% if slot.waitlist_is_current_user(i, current_user_name) %}
+                                <form
+                                    hx-post="/slots/{{ slot.id }}/cancel"
+                                    hx-target="#slot-{{ slot.id }}"
+                                    hx-swap="outerHTML"
+                                >
+                                    <button type="submit" class="btn btn-outline btn-error btn-xs">Cancel</button>
+                                </form>
+                                {% endif %}
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>

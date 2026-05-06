@@ -3,21 +3,24 @@ pub mod error;
 pub mod models;
 
 use crate::{
-    db::{create_user, find_user_by_id, find_user_by_name, list_slots, list_users},
+    db::{
+        CancelOutcome, SignupOutcome, cancel_booking_for_slot, create_user, find_slot,
+        find_user_by_id, find_user_by_name, list_slots, list_users, signup_for_slot,
+    },
     models::{Slot, UserIdentity},
 };
 use askama::Template;
 use axum::{
     Form, Router,
-    extract::State,
-    http::{HeaderMap, HeaderValue, header},
+    extract::{Path, State},
+    http::{HeaderMap, HeaderName, HeaderValue, header},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
 use error::AppError;
 use serde::Deserialize;
 use sqlx::SqlitePool;
-use std::path::Path;
+use std::path::Path as FsPath;
 use tower_http::trace::TraceLayer;
 
 #[derive(Template)]
@@ -25,7 +28,24 @@ use tower_http::trace::TraceLayer;
 struct SlotsTemplate {
     title: String,
     current_user_label: String,
+    current_user_name: String,
     slots: Vec<Slot>,
+}
+
+#[derive(Template)]
+#[template(path = "slots_content.html")]
+struct SlotsContentTemplate {
+    title: String,
+    current_user_label: String,
+    current_user_name: String,
+    slots: Vec<Slot>,
+}
+
+#[derive(Template)]
+#[template(path = "slot_card.html")]
+struct SlotCardTemplate {
+    slot: Slot,
+    current_user_name: String,
 }
 
 #[derive(Template)]
@@ -58,7 +78,7 @@ struct UserSelectionForm {
 /// Returns an error when pool initialization or migrations fail.
 pub async fn app() -> Result<Router, AppError> {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        if Path::new("/data").is_dir() {
+        if FsPath::new("/data").is_dir() {
             "sqlite:///data/hoopline.db".to_string()
         } else {
             "sqlite://tmp/hoopline.db".to_string()
@@ -73,6 +93,9 @@ pub fn app_with_pool(pool: SqlitePool) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/slots", get(index))
+        .route("/slots/fragment", get(slots_fragment))
+        .route("/slots/{slot_id}/signup", post(signup_slot))
+        .route("/slots/{slot_id}/cancel", post(cancel_slot))
         .route("/users", get(users_fragment))
         .route("/users/select", post(select_user))
         .route("/healthz", get(healthz))
@@ -86,11 +109,106 @@ async fn index(
     headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
     let current_user = current_user_from_headers(&pool, &headers).await?;
+    let current_user_name = current_user
+        .as_ref()
+        .map_or_else(String::new, |user| user.name.clone());
     let template = SlotsTemplate {
         title: "Hoopline".to_string(),
-        current_user_label: current_user
-            .map_or_else(|| "Select your name".to_string(), |user| user.name),
+        current_user_label: if current_user_name.is_empty() {
+            "Select your name".to_string()
+        } else {
+            current_user_name.clone()
+        },
+        current_user_name,
         slots: list_slots(&pool).await?,
+    };
+    Ok(Html(template.render()?))
+}
+
+async fn slots_fragment(
+    State(pool): State<SqlitePool>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
+    let current_user = current_user_from_headers(&pool, &headers).await?;
+    let current_user_name = current_user
+        .as_ref()
+        .map_or_else(String::new, |user| user.name.clone());
+    let template = SlotsContentTemplate {
+        title: "Hoopline".to_string(),
+        current_user_label: if current_user_name.is_empty() {
+            "Select your name".to_string()
+        } else {
+            current_user_name.clone()
+        },
+        current_user_name,
+        slots: list_slots(&pool).await?,
+    };
+    Ok(Html(template.render()?))
+}
+
+async fn signup_slot(
+    State(pool): State<SqlitePool>,
+    Path(slot_id): Path<i64>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
+    let current_user = current_user_from_headers(&pool, &headers)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("select your name first".to_string()))?;
+
+    match signup_for_slot(&pool, slot_id, current_user.id).await? {
+        SignupOutcome::AddedPlayer | SignupOutcome::AddedWaitlist => {}
+        SignupOutcome::AlreadySignedUp => {
+            return Err(AppError::BadRequest(
+                "you are already signed up for this slot".to_string(),
+            ));
+        }
+        SignupOutcome::Full => {
+            return Err(AppError::BadRequest(
+                "slot and waitlist are already full".to_string(),
+            ));
+        }
+        SignupOutcome::SlotNotFound => {
+            return Err(AppError::BadRequest("slot does not exist".to_string()));
+        }
+    }
+
+    let slot = find_slot(&pool, slot_id)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
+    let template = SlotCardTemplate {
+        slot,
+        current_user_name: current_user.name,
+    };
+    Ok(Html(template.render()?))
+}
+
+async fn cancel_slot(
+    State(pool): State<SqlitePool>,
+    Path(slot_id): Path<i64>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
+    let current_user = current_user_from_headers(&pool, &headers)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("select your name first".to_string()))?;
+
+    match cancel_booking_for_slot(&pool, slot_id, current_user.id).await? {
+        CancelOutcome::Cancelled => {}
+        CancelOutcome::NotSignedUp => {
+            return Err(AppError::BadRequest(
+                "you are not signed up for this slot".to_string(),
+            ));
+        }
+        CancelOutcome::SlotNotFound => {
+            return Err(AppError::BadRequest("slot does not exist".to_string()));
+        }
+    }
+
+    let slot = find_slot(&pool, slot_id)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
+    let template = SlotCardTemplate {
+        slot,
+        current_user_name: current_user.name,
     };
     Ok(Html(template.render()?))
 }
@@ -146,6 +264,10 @@ async fn select_user(
     response.headers_mut().insert(
         header::SET_COOKIE,
         user_cookie_header_value(selected_user.id)?,
+    );
+    response.headers_mut().insert(
+        HeaderName::from_static("hx-trigger"),
+        HeaderValue::from_static("user-changed"),
     );
     Ok(response)
 }

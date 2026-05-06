@@ -1,0 +1,18 @@
+<section
+    id="slots-content"
+    class="max-w-5xl w-full space-y-4"
+    hx-get="/slots/fragment"
+    hx-trigger="user-changed from:body"
+    hx-swap="outerHTML"
+>
+    <div class="text-center">
+        <h1 class="text-3xl font-bold">{{ title }}</h1>
+        <p class="text-base-content/70">Upcoming slots</p>
+        <p class="text-sm text-base-content/60">Current user: {{ current_user_label }}</p>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for slot in slots %}
+            {% include "slot_card.html" %}
+        {% endfor %}
+    </div>
+</section>

@@ -2,6 +2,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use hoopline::{app_with_pool, db};
 use http_body_util::BodyExt;
+use sqlx::Row;
 use tower::ServiceExt;
 
 async fn response_body_string(response: axum::response::Response) -> String {
@@ -49,6 +50,30 @@ async fn get_slots_returns_seeded_data() {
     let body = response_body_string(response).await;
     assert!(body.contains("Court B"));
     assert!(body.contains("Jamal"));
+    assert!(body.contains("id=\"slots-content\""));
+    assert!(body.contains("hx-trigger=\"user-changed from:body\""));
+}
+
+#[tokio::test]
+async fn get_slots_fragment_reflects_selected_user_from_cookie() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/slots/fragment")
+                .header(header::COOKIE, "user_id=1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body_string(response).await;
+    assert!(body.contains("Current user: Alex"));
+    assert!(body.contains("Cancel"));
 }
 
 #[tokio::test]
@@ -120,7 +145,15 @@ async fn post_users_select_sets_cookie_and_persists_identity() {
         .to_str()
         .unwrap()
         .to_string();
+    let hx_trigger = response
+        .headers()
+        .get("hx-trigger")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
     assert!(set_cookie.contains("user_id=2"));
+    assert_eq!(hx_trigger, "user-changed");
     let body = response_body_string(response).await;
     assert!(body.contains("Current user"));
     assert!(body.contains("Ben"));
@@ -185,4 +218,219 @@ async fn post_users_select_creates_user_when_missing() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_body_string(response).await;
     assert!(body.contains("Taylor"));
+}
+
+#[tokio::test]
+async fn post_slots_signup_adds_player_and_highlights_current_user() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/slots/3/signup")
+                .header(header::COOKIE, "user_id=6")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body_string(response).await;
+    assert!(body.contains("id=\"slot-3\""));
+    assert!(body.contains("Farid"));
+    assert!(body.contains("You"));
+
+    let booking =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(3_i64)
+            .bind(6_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(booking.get::<i64, _>("is_waitlist"), 0);
+    assert_eq!(booking.get::<i64, _>("position"), 6);
+}
+
+#[tokio::test]
+async fn post_slots_signup_routes_to_waitlist_when_players_are_full() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    sqlx::query("UPDATE slots SET max_players = ? WHERE id = ?")
+        .bind(8_i64)
+        .bind(2_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let app = app_with_pool(pool.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/slots/2/signup")
+                .header(header::COOKIE, "user_id=8")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let booking =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(2_i64)
+            .bind(8_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(booking.get::<i64, _>("is_waitlist"), 1);
+    assert_eq!(booking.get::<i64, _>("position"), 2);
+}
+
+#[tokio::test]
+async fn post_slots_signup_rejects_when_slot_and_waitlist_are_full() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    sqlx::query("UPDATE slots SET max_players = ?, max_waitlist = ? WHERE id = ?")
+        .bind(8_i64)
+        .bind(1_i64)
+        .bind(2_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let app = app_with_pool(pool.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/slots/2/signup")
+                .header(header::COOKIE, "user_id=8")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let booking_count: i64 =
+        sqlx::query("SELECT COUNT(*) as count FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(2_i64)
+            .bind(8_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get("count");
+    assert_eq!(booking_count, 0);
+}
+
+#[tokio::test]
+async fn post_slots_signup_rejects_duplicate_user() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/slots/1/signup")
+                .header(header::COOKIE, "user_id=1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn post_slots_cancel_promotes_waitlist_after_player_cancel() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/slots/1/cancel")
+                .header(header::COOKIE, "user_id=2")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let cancelled_count: i64 =
+        sqlx::query("SELECT COUNT(*) as count FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(1_i64)
+            .bind(2_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get("count");
+    assert_eq!(cancelled_count, 0);
+
+    let promoted_booking =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(1_i64)
+            .bind(7_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(promoted_booking.get::<i64, _>("is_waitlist"), 0);
+    assert_eq!(promoted_booking.get::<i64, _>("position"), 6);
+
+    let shifted_waitlist =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(1_i64)
+            .bind(8_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(shifted_waitlist.get::<i64, _>("is_waitlist"), 1);
+    assert_eq!(shifted_waitlist.get::<i64, _>("position"), 1);
+}
+
+#[tokio::test]
+async fn post_slots_cancel_shifts_waitlist_after_waitlist_cancel() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/slots/3/cancel")
+                .header(header::COOKIE, "user_id=4")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let cancelled_count: i64 =
+        sqlx::query("SELECT COUNT(*) as count FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(3_i64)
+            .bind(4_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get("count");
+    assert_eq!(cancelled_count, 0);
+
+    let shifted_waitlist =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(3_i64)
+            .bind(5_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(shifted_waitlist.get::<i64, _>("is_waitlist"), 1);
+    assert_eq!(shifted_waitlist.get::<i64, _>("position"), 2);
 }

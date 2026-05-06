@@ -1,9 +1,25 @@
 use std::str::FromStr;
 
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
 
 use crate::models::{Slot, UserIdentity};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SignupOutcome {
+    AddedPlayer,
+    AddedWaitlist,
+    AlreadySignedUp,
+    Full,
+    SlotNotFound,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CancelOutcome {
+    Cancelled,
+    NotSignedUp,
+    SlotNotFound,
+}
 
 /// Initializes a `SQLite` pool, enables foreign keys, and runs migrations.
 ///
@@ -59,6 +75,218 @@ pub async fn list_slots(pool: &SqlitePool) -> Result<Vec<Slot>, sqlx::Error> {
     .fetch_all(pool)
     .await?;
 
+    slots_from_rows(rows)
+}
+
+/// Returns a single slot with booking names split into players and waitlist.
+///
+/// # Errors
+///
+/// Returns an error when the slot query fails, or row decoding fails.
+pub async fn find_slot(pool: &SqlitePool, slot_id: i64) -> Result<Option<Slot>, sqlx::Error> {
+    let rows = sqlx::query(
+        r"
+        SELECT
+            s.id,
+            s.datetime,
+            s.venue,
+            b.is_waitlist,
+            u.name
+        FROM slots s
+        LEFT JOIN bookings b ON b.slot_id = s.id
+        LEFT JOIN users u ON u.id = b.user_id
+        WHERE s.id = ?
+        ORDER BY s.datetime, s.id, b.is_waitlist, b.position
+        ",
+    )
+    .bind(slot_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut slots = slots_from_rows(rows)?;
+    Ok(slots.pop())
+}
+
+/// Signs up a user to either player list or waitlist for a slot.
+///
+/// # Errors
+///
+/// Returns an error when querying or writing booking data fails.
+pub async fn signup_for_slot(
+    pool: &SqlitePool,
+    slot_id: i64,
+    user_id: i64,
+) -> Result<SignupOutcome, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let slot_limits = sqlx::query("SELECT max_players, max_waitlist FROM slots WHERE id = ?")
+        .bind(slot_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let Some(slot_limits) = slot_limits else {
+        return Ok(SignupOutcome::SlotNotFound);
+    };
+    let max_players: i64 = slot_limits.try_get("max_players")?;
+    let max_waitlist: i64 = slot_limits.try_get("max_waitlist")?;
+
+    let already_signed_up: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(slot_id)
+            .bind(user_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if already_signed_up > 0 {
+        return Ok(SignupOutcome::AlreadySignedUp);
+    }
+
+    let player_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM bookings WHERE slot_id = ? AND is_waitlist = 0")
+            .bind(slot_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if player_count < max_players {
+        sqlx::query(
+            "INSERT INTO bookings (slot_id, user_id, position, is_waitlist) VALUES (?, ?, ?, 0)",
+        )
+        .bind(slot_id)
+        .bind(user_id)
+        .bind(player_count + 1)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(SignupOutcome::AddedPlayer);
+    }
+
+    let waitlist_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM bookings WHERE slot_id = ? AND is_waitlist = 1")
+            .bind(slot_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if waitlist_count < max_waitlist {
+        sqlx::query(
+            "INSERT INTO bookings (slot_id, user_id, position, is_waitlist) VALUES (?, ?, ?, 1)",
+        )
+        .bind(slot_id)
+        .bind(user_id)
+        .bind(waitlist_count + 1)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(SignupOutcome::AddedWaitlist);
+    }
+
+    Ok(SignupOutcome::Full)
+}
+
+/// Cancels a user's booking and promotes waitlist #1 when needed.
+///
+/// # Errors
+///
+/// Returns an error when querying or writing booking data fails.
+pub async fn cancel_booking_for_slot(
+    pool: &SqlitePool,
+    slot_id: i64,
+    user_id: i64,
+) -> Result<CancelOutcome, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let slot_exists: Option<i64> = sqlx::query_scalar("SELECT id FROM slots WHERE id = ?")
+        .bind(slot_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if slot_exists.is_none() {
+        return Ok(CancelOutcome::SlotNotFound);
+    }
+
+    let booking = sqlx::query(
+        "SELECT id, position, is_waitlist FROM bookings WHERE slot_id = ? AND user_id = ?",
+    )
+    .bind(slot_id)
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(booking) = booking else {
+        return Ok(CancelOutcome::NotSignedUp);
+    };
+
+    let booking_id: i64 = booking.try_get("id")?;
+    let booking_position: i64 = booking.try_get("position")?;
+    let is_waitlist: i64 = booking.try_get("is_waitlist")?;
+
+    sqlx::query("DELETE FROM bookings WHERE id = ?")
+        .bind(booking_id)
+        .execute(&mut *tx)
+        .await?;
+
+    if is_waitlist == 1 {
+        sqlx::query(
+            "UPDATE bookings
+             SET position = position - 1
+             WHERE slot_id = ? AND is_waitlist = 1 AND position > ?",
+        )
+        .bind(slot_id)
+        .bind(booking_position)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(CancelOutcome::Cancelled);
+    }
+
+    sqlx::query(
+        "UPDATE bookings
+         SET position = position - 1
+         WHERE slot_id = ? AND is_waitlist = 0 AND position > ?",
+    )
+    .bind(slot_id)
+    .bind(booking_position)
+    .execute(&mut *tx)
+    .await?;
+
+    let waitlist_top = sqlx::query(
+        "SELECT id, position
+         FROM bookings
+         WHERE slot_id = ? AND is_waitlist = 1
+         ORDER BY position ASC
+         LIMIT 1",
+    )
+    .bind(slot_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(waitlist_top) = waitlist_top {
+        let promoted_booking_id: i64 = waitlist_top.try_get("id")?;
+        let promoted_waitlist_position: i64 = waitlist_top.try_get("position")?;
+
+        let next_player_position: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(position), 0) + 1 FROM bookings WHERE slot_id = ? AND is_waitlist = 0",
+        )
+        .bind(slot_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "UPDATE bookings
+             SET is_waitlist = 0, position = ?
+             WHERE id = ?",
+        )
+        .bind(next_player_position)
+        .bind(promoted_booking_id)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "UPDATE bookings
+             SET position = position - 1
+             WHERE slot_id = ? AND is_waitlist = 1 AND position > ?",
+        )
+        .bind(slot_id)
+        .bind(promoted_waitlist_position)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok(CancelOutcome::Cancelled)
+}
+
+fn slots_from_rows(rows: Vec<SqliteRow>) -> Result<Vec<Slot>, sqlx::Error> {
     let mut slots = Vec::new();
     let mut current_slot: Option<Slot> = None;
 
