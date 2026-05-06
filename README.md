@@ -37,25 +37,6 @@ docker run --rm -p 5050:5050 -v "$(pwd)/data:/data" hoopline:latest
 
 The included `Dockerfile` is production-ready for persistent SQLite at `/data/hoopline.db`.
 
-## Deploy to Fly.io
-
-This repo includes `fly.toml`. Typical flow:
-
-```sh
-fly launch --copy-config --now=false
-fly volumes create hoopline_data --region <region> --size 1
-fly deploy
-```
-
-Set `DATABASE_URL=sqlite:///data/hoopline.db` and mount the Fly volume at `/data`.
-
-## Deploy to Hetzner (Docker host)
-
-1. Provision a VM and install Docker.
-2. Mount persistent storage to `/data`.
-3. Run the same image with `-v /data:/data`.
-4. Put Caddy/Nginx in front of port `5050` for TLS.
-
 ## SQLite backup strategy
 
 Use the included script to write timestamped backups and prune old ones:
