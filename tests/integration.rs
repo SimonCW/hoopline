@@ -2,6 +2,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use hoopline::{app_with_pool, db};
 use http_body_util::BodyExt;
+use sqlx::Row;
 use tower::ServiceExt;
 
 async fn response_body_string(response: axum::response::Response) -> String {
@@ -185,4 +186,129 @@ async fn post_users_select_creates_user_when_missing() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_body_string(response).await;
     assert!(body.contains("Taylor"));
+}
+
+#[tokio::test]
+async fn post_slots_signup_adds_player_and_highlights_current_user() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/slots/3/signup")
+                .header(header::COOKIE, "user_id=6")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body_string(response).await;
+    assert!(body.contains("id=\"slot-3\""));
+    assert!(body.contains("Farid"));
+    assert!(body.contains("You"));
+
+    let booking =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(3_i64)
+            .bind(6_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(booking.get::<i64, _>("is_waitlist"), 0);
+    assert_eq!(booking.get::<i64, _>("position"), 6);
+}
+
+#[tokio::test]
+async fn post_slots_signup_routes_to_waitlist_when_players_are_full() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    sqlx::query("UPDATE slots SET max_players = ? WHERE id = ?")
+        .bind(8_i64)
+        .bind(2_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let app = app_with_pool(pool.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/slots/2/signup")
+                .header(header::COOKIE, "user_id=8")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let booking =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(2_i64)
+            .bind(8_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(booking.get::<i64, _>("is_waitlist"), 1);
+    assert_eq!(booking.get::<i64, _>("position"), 2);
+}
+
+#[tokio::test]
+async fn post_slots_signup_rejects_when_slot_and_waitlist_are_full() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    sqlx::query("UPDATE slots SET max_players = ?, max_waitlist = ? WHERE id = ?")
+        .bind(8_i64)
+        .bind(1_i64)
+        .bind(2_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let app = app_with_pool(pool.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/slots/2/signup")
+                .header(header::COOKIE, "user_id=8")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let booking_count: i64 =
+        sqlx::query("SELECT COUNT(*) as count FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(2_i64)
+            .bind(8_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get("count");
+    assert_eq!(booking_count, 0);
+}
+
+#[tokio::test]
+async fn post_slots_signup_rejects_duplicate_user() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/slots/1/signup")
+                .header(header::COOKIE, "user_id=1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
