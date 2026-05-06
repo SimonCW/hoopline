@@ -12,6 +12,6 @@ CREATE TABLE slot_schedules (
 CREATE UNIQUE INDEX slots_datetime_venue_unique ON slots(datetime, venue);
 
 INSERT INTO slot_schedules (weekday, time_utc, venue, max_players, max_waitlist, is_active) VALUES
-    (1, '20:00', 'Court A', 15, 5, 1),
-    (2, '20:00', 'Court B', 15, 5, 1),
-    (4, '20:00', 'Court C', 15, 5, 1);
+    (1, '20:00', 'Luisenschule', 15, 5, 1),
+    (2, '20:00', 'Ceci', 15, 5, 1),
+    (4, '20:00', 'Diesterweg', 15, 5, 1);

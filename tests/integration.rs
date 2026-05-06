@@ -24,7 +24,7 @@ async fn get_root_returns_ok_and_body() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_body_string(response).await;
     assert!(body.contains("Hoopline"));
-    assert!(body.contains("Court A"));
+    assert!(body.contains("Luisenschule"));
     assert!(body.contains("Alex"));
     assert_eq!(body.matches("data-testid=\"slot-card\"").count(), 3);
     assert_eq!(body.matches("data-testid=\"player-row\"").count(), 45);
@@ -48,7 +48,7 @@ async fn get_slots_returns_seeded_data() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_body_string(response).await;
-    assert!(body.contains("Court B"));
+    assert!(body.contains("Ceci"));
     assert!(body.contains("Jamal"));
     assert!(body.contains("id=\"slots-content\""));
     assert!(body.contains("hx-trigger=\"user-changed from:body\""));

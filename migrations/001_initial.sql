@@ -35,10 +35,34 @@ INSERT INTO users (id, name, is_admin) VALUES
     (9, 'Ira', 0),
     (10, 'Jamali', 0);
 
+WITH week_start AS (
+    SELECT date(
+        'now',
+        '-' || ((CAST(strftime('%w', 'now') AS INTEGER) + 6) % 7) || ' days'
+    ) AS monday
+)
 INSERT INTO slots (id, datetime, venue, max_players, max_waitlist) VALUES
-    (1, '2026-03-09T20:00:00Z', 'Court A', 15, 5),
-    (2, '2026-03-10T20:00:00Z', 'Court B', 15, 5),
-    (3, '2026-03-12T20:00:00Z', 'Court C', 15, 5);
+    (
+        1,
+        (SELECT strftime('%Y-%m-%dT20:00:00Z', monday) FROM week_start),
+        'Luisenschule',
+        15,
+        5
+    ),
+    (
+        2,
+        (SELECT strftime('%Y-%m-%dT20:00:00Z', date(monday, '+1 day')) FROM week_start),
+        'Ceci',
+        15,
+        5
+    ),
+    (
+        3,
+        (SELECT strftime('%Y-%m-%dT20:00:00Z', date(monday, '+3 day')) FROM week_start),
+        'Diesterweg',
+        15,
+        5
+    );
 
 INSERT INTO bookings (slot_id, user_id, position, is_waitlist) VALUES
     (1, 1, 1, 0),
