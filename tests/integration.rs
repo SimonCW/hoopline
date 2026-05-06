@@ -312,3 +312,93 @@ async fn post_slots_signup_rejects_duplicate_user() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn post_slots_cancel_promotes_waitlist_after_player_cancel() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/slots/1/cancel")
+                .header(header::COOKIE, "user_id=2")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let cancelled_count: i64 =
+        sqlx::query("SELECT COUNT(*) as count FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(1_i64)
+            .bind(2_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get("count");
+    assert_eq!(cancelled_count, 0);
+
+    let promoted_booking =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(1_i64)
+            .bind(7_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(promoted_booking.get::<i64, _>("is_waitlist"), 0);
+    assert_eq!(promoted_booking.get::<i64, _>("position"), 6);
+
+    let shifted_waitlist =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(1_i64)
+            .bind(8_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(shifted_waitlist.get::<i64, _>("is_waitlist"), 1);
+    assert_eq!(shifted_waitlist.get::<i64, _>("position"), 1);
+}
+
+#[tokio::test]
+async fn post_slots_cancel_shifts_waitlist_after_waitlist_cancel() {
+    let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    let app = app_with_pool(pool.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/slots/3/cancel")
+                .header(header::COOKIE, "user_id=4")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let cancelled_count: i64 =
+        sqlx::query("SELECT COUNT(*) as count FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(3_i64)
+            .bind(4_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get("count");
+    assert_eq!(cancelled_count, 0);
+
+    let shifted_waitlist =
+        sqlx::query("SELECT is_waitlist, position FROM bookings WHERE slot_id = ? AND user_id = ?")
+            .bind(3_i64)
+            .bind(5_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(shifted_waitlist.get::<i64, _>("is_waitlist"), 1);
+    assert_eq!(shifted_waitlist.get::<i64, _>("position"), 2);
+}

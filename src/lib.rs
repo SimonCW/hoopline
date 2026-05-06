@@ -4,8 +4,8 @@ pub mod models;
 
 use crate::{
     db::{
-        SignupOutcome, create_user, find_slot, find_user_by_id, find_user_by_name, list_slots,
-        list_users, signup_for_slot,
+        CancelOutcome, SignupOutcome, cancel_booking_for_slot, create_user, find_slot,
+        find_user_by_id, find_user_by_name, list_slots, list_users, signup_for_slot,
     },
     models::{Slot, UserIdentity},
 };
@@ -85,6 +85,7 @@ pub fn app_with_pool(pool: SqlitePool) -> Router {
         .route("/", get(index))
         .route("/slots", get(index))
         .route("/slots/{slot_id}/signup", post(signup_slot))
+        .route("/slots/{slot_id}/cancel", post(cancel_slot))
         .route("/users", get(users_fragment))
         .route("/users/select", post(select_user))
         .route("/healthz", get(healthz))
@@ -136,6 +137,37 @@ async fn signup_slot(
             ));
         }
         SignupOutcome::SlotNotFound => {
+            return Err(AppError::BadRequest("slot does not exist".to_string()));
+        }
+    }
+
+    let slot = find_slot(&pool, slot_id)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
+    let template = SlotCardTemplate {
+        slot,
+        current_user_name: current_user.name,
+    };
+    Ok(Html(template.render()?))
+}
+
+async fn cancel_slot(
+    State(pool): State<SqlitePool>,
+    Path(slot_id): Path<i64>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
+    let current_user = current_user_from_headers(&pool, &headers)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("select your name first".to_string()))?;
+
+    match cancel_booking_for_slot(&pool, slot_id, current_user.id).await? {
+        CancelOutcome::Cancelled => {}
+        CancelOutcome::NotSignedUp => {
+            return Err(AppError::BadRequest(
+                "you are not signed up for this slot".to_string(),
+            ));
+        }
+        CancelOutcome::SlotNotFound => {
             return Err(AppError::BadRequest("slot does not exist".to_string()));
         }
     }
