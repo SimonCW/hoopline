@@ -1,5 +1,12 @@
 # Copilot Instructions for Hoopline
 
+## Communication
+- Write agent responses in ASD-STE100 Simplified Technical English.
+- Use short sentences, active voice, and clear instructions.
+- Use one main subject per sentence. Remove unnecessary words.
+- Keep code, commands, file paths, and technical names accurate.
+- State the result first. State which checks passed or failed.
+
 ## Commands to run
 - Check Justfile first to find useful commands, specific to this repository. Always prefer those!
 
