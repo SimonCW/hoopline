@@ -3,6 +3,10 @@ verify:
   cargo clippy --all-targets --all-features
   cargo test --all-targets --all-features
 
+# Run `npm ci` and `npx playwright install chromium` before the first run.
+test-ui:
+  npm run test:ui
+
 healthcheck db_mode="memory":
   db_mode="{{db_mode}}"; \
   if [ "$db_mode" = "file" ]; then \

@@ -8,7 +8,7 @@ Improve the normal member experience first. Focus on clear slot information, sim
 
 ## Repository Review and Member UX Priorities (2026-11-03)
 
-### Current Status
+### Status at Review (Before Member UX Changes)
 - The core MVP is implemented: name selection, self-registration, signup, cancellation, automatic waitlist promotion, and admin removal/promotion.
 - SQLite persistence, Docker deployment files, and a backup script exist. The live deployment and backup restoration were not verified.
 - R2 layout tasks are complete. R1, R3, and R4 remain open and are now deferred.
@@ -22,36 +22,51 @@ Improve the normal member experience first. Focus on clear slot information, sim
 
 ### Recommended Work Order
 
-These are recommendations, not completed features. Member UI and UX take priority over the admin milestones below.
+Member UI and UX take priority over the admin milestones below. Checked items are implemented on `member-mobile-ux`. Preference decisions and real member testing remain open.
 
 #### 1. Make Slot Information Reliable
-- [ ] Show upcoming slots only. Reject new bookings for slots that have started.
-- [ ] Renew the booking window automatically without requiring a restart or admin action. Confirm whether slots open on a rolling basis or on Sunday evenings.
-- [ ] Confirm the intended local time zone. Generate and display local times correctly across daylight-saving changes.
-- [ ] Use database capacity values for counts, labels, and available places.
+- [x] Show upcoming slots only. Reject new bookings for slots that have started.
+- [x] Renew the rolling 14-day booking window automatically, checked every minute.
+- [x] Generate and display new slots in `Europe/Berlin`, including daylight-saving changes.
+- [x] Use database capacity values for counts, labels, and available places.
+- [ ] Confirm the rolling window versus Sunday release with members. Confirm `Europe/Berlin` as the venue time zone.
 
 #### 2. Make the Mobile Slot List Easy to Scan
-- [ ] Group slots by week and keep chronological order. Use clear date, time, and venue labels.
-- [ ] Show availability at the top of each card, such as `9/15 players` and `2/5 waitlist`.
-- [ ] Reduce empty-row space. Keep booked names visible and offer a way to expand full lists if needed. Test this against the group's spreadsheet-style view before replacing it.
-- [ ] Show a clear booking status on each card: not booked, confirmed, waitlist position, or full. Do not rely on row color alone.
+- [x] Group slots by week and keep chronological order. Use clear date, time, and venue labels.
+- [x] Show availability at the top of each card, such as `9/15 players` and `2/5 waitlist`.
+- [x] Remove empty rows and offer expandable rosters. Preserve expanded rosters after booking updates.
+- [ ] Test compact cards against the spreadsheet-style view with real members.
+- [x] Show a clear booking status on each card: not booked, confirmed, waitlist position, or full. Do not rely on row color alone.
 - [ ] Use one consistent interface language. Confirm whether members prefer German.
 
 #### 3. Make Identity and Booking Actions Clear
-- [ ] Use a compact identity header after name selection. Keep a clear `Change name` action.
-- [ ] Make existing names searchable. Keep new-user creation behind an explicit action to reduce accidental duplicate identities.
-- [ ] Keep the primary action near the slot summary: `Sign up`, `Join waitlist`, or `Cancel booking`.
-- [ ] Explain waitlist behavior before joining. State that cancellation automatically promotes the first person in line.
-- [ ] Show local success feedback after each action, including the resulting booking status or waitlist position.
-- [ ] Prevent repeated submissions while a request is pending. Keep errors near the affected slot and announce status changes to screen readers.
-- [ ] Protect against accidental cancellation with a short confirmation. Do not promise undo unless queue fairness can be preserved.
+- [x] Require name selection before the overview. Show only the selected name and `Log out` at the top right during booking.
+- [x] Add a fuzzy-search dropdown with explicit pointer or keyboard selection. Keep new-user creation behind an explicit action to reduce accidental duplicate identities.
+- [x] Remember the selected user ID for one year with an `HttpOnly`, `SameSite=Lax` cookie. Logout clears the cookie without cancelling bookings. Support `COOKIE_SECURE=true` for HTTPS deployments.
+- [x] Keep the primary action near the slot summary: `Sign up`, `Join waitlist`, or `Cancel booking`.
+- [x] Explain waitlist behavior before joining. State that cancellation automatically promotes the first person in line.
+- [x] Show local success feedback after each action, including the resulting booking status or waitlist position.
+- [x] Prevent repeated submissions while a request is pending. Keep errors near the affected slot and announce status changes to screen readers.
+- [x] Protect against accidental cancellation with a short confirmation. Do not promise undo unless queue fairness can be preserved.
 
 #### 4. Test the Complete Member Flow
-- [ ] Test name selection, signup, waitlisting, cancellation, and promotion on phone and desktop browsers.
-- [ ] Test keyboard navigation, visible focus, contrast, readable names, and touch targets.
-- [ ] Refresh booking state when the page regains focus so returning members do not act on stale availability.
-- [ ] Test simultaneous signups with a file-backed database. Handle conflicts with clear retry feedback.
-- [ ] Test slow networks and failed requests. Confirm that failed actions do not show success or change the displayed booking state.
+- [x] Test name selection, signup, waitlisting, cancellation, and promotion in Chromium with phone and desktop layouts.
+- [x] Test keyboard navigation, focus restoration, automated contrast/accessibility rules, long names, and touch targets. Check overflow at 320px, 390px, and 430px.
+- [x] Refresh booking state and identity when the page regains focus. Add a manual refresh action.
+- [x] Test simultaneous signups with a file-backed database. Serialize writes and show retry feedback for database conflicts.
+- [x] Test slow networks and failed requests. Confirm that failed actions do not show success or change the displayed booking state.
+- [ ] Check the flow on real iOS and Android devices and with a screen reader. Automated checks do not replace this test.
+
+### Implementation Notes
+- New schedules interpret `20:00` as Berlin local time. Existing slots keep their stored instant and bookings. Generation avoids creating another slot at the same venue on that local date.
+- Existing legacy slots can therefore show a different local time until reviewed. Do not silently move an existing booking.
+- Keep English action labels and the existing German short date format for now.
+- Remove the visible time-zone label. Remembered users skip name selection. Visitors without a valid identity cookie cannot see the overview. Returning to an open overview after logout in another tab returns to name selection.
+- Keep the overview header compact: Hoopline first, Log out at the top right, and `You're up next, Name` below. Highlight the name with a high-contrast badge instead of a separate identity row.
+- Use local CSS instead of runtime Tailwind/CDN styling. HTMX remains pinned to its existing CDN version.
+- Browser tests use an isolated in-memory server on port 5051. They do not change the local preview or production database.
+- Verification passed: build, formatting, Clippy, 37 Rust tests, and 32 phone/desktop browser tests. Automated accessibility scans cover name suggestions, name forms, rosters, and confirmed booking state.
+- Admin editing milestones remain deferred. Existing admin endpoints remain available.
 
 ### Before a Real User Trial
 - [ ] Verify persistent storage and restore a backup. Remove the unsafe live-file copy fallback from the backup process.

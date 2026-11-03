@@ -1,62 +1,49 @@
-<header id="user-selector" class="card bg-base-100 shadow-md">
-    <div class="card-body p-4 gap-3">
-        <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-            <div>
-                <p class="text-xs uppercase tracking-wide text-base-content/60">Current user</p>
-                <p class="font-semibold">
-                    {{ current_user_label }}
-                    {% if current_user_is_admin %}
-                    <span class="badge badge-primary badge-sm ml-1">Admin mode</span>
-                    {% endif %}
-                </p>
-            </div>
-            <form
-                class="flex flex-col sm:flex-row gap-2 sm:gap-0 sm:join w-full md:w-auto"
-                hx-post="/users/select"
-                hx-target="#user-selector"
-                hx-swap="outerHTML"
-                hx-indicator="#global-loading"
-            >
-                <label class="sm:join-item btn btn-ghost cursor-default no-animation">Select</label>
-                <select class="select select-bordered sm:join-item w-full sm:w-auto" name="selected_user_id">
-                    <option value="">Choose a user</option>
-                    {% for user in users %}
-                    <option value="{{ user.id }}" {% if self.is_selected(user.id) %}selected{% endif %}>
-                        {{ user.name }}
-                    </option>
-                    {% endfor %}
-                </select>
-                <button type="submit" class="btn btn-primary sm:join-item">Use</button>
-            </form>
+{% if selected_user_id.is_none() %}
+<section id="name-step" class="card welcome-card" aria-labelledby="welcome-title" hx-sync="body:drop" hx-disabled-elt="find button">
+    <p class="eyebrow">You're up next</p>
+    <h1 id="welcome-title">Hoopline</h1>
+    <p class="welcome-intro">Choose your name to see the next games.</p>
+    <form action="/users/select" method="post" hx-post="/users/select" class="identity-form">
+        <label for="existing-user">Your name</label>
+        <div class="name-search">
+            <input id="existing-user" name="existing_user_name" type="text" role="combobox" aria-autocomplete="list" aria-controls="member-matches" aria-expanded="false"
+                autocomplete="off" autocapitalize="words" spellcheck="false" maxlength="64" required placeholder="Start typing your name" aria-describedby="identity-help search-status">
+            <ul id="member-matches" class="member-matches" role="listbox" aria-label="Matching members" hidden>
+                {% for user in users %}<li id="member-option-{{ user.id }}" role="option" tabindex="-1" aria-selected="false" data-name="{{ user.name }}" hidden>{{ user.name }}</li>{% endfor %}
+            </ul>
         </div>
-
-        <form
-            class="flex flex-col sm:flex-row gap-2"
-            hx-post="/users/select"
-            hx-target="#user-selector"
-            hx-swap="outerHTML"
-            hx-indicator="#global-loading"
-        >
-            <input
-                class="input input-bordered flex-1"
-                type="text"
-                name="new_user_name"
-                maxlength="64"
-                placeholder="New user name"
-                required
-            >
-            <button type="submit" class="btn btn-secondary">Create user</button>
+        <p id="search-status" class="muted" role="status" aria-live="polite"></p>
+        <button id="use-name" type="submit" class="btn btn-primary">Continue</button>
+        <p id="identity-help" class="muted">Use your own name. We will remember it on this device.</p>
+    </form>
+    <details id="new-member" class="new-member">
+        <summary>New here? Add a new member</summary>
+        <form action="/users/select" method="post" hx-post="/users/select" class="identity-form">
+            <label for="new-user-name">New member name</label>
+            <input id="new-user-name" type="text" name="new_user_name" maxlength="64" required autocomplete="name" aria-describedby="new-user-help">
+            <p id="new-user-help" class="muted">Check the matching names first to avoid duplicates.</p>
+            <button id="create-name" type="submit" class="btn btn-secondary">Create and continue</button>
         </form>
-
-        {% if current_user_is_admin %}
-        <form
-            hx-post="/admin/slots/generate"
-            hx-target="#slots-content"
-            hx-swap="outerHTML"
-            hx-indicator="#global-loading"
-        >
-            <button type="submit" class="btn btn-outline btn-primary btn-sm">Generate next 2 weeks</button>
-        </form>
-        {% endif %}
+    </details>
+    <p class="request-error" role="alert" tabindex="-1" hidden></p>
+    <span class="htmx-indicator" role="status">Opening your games…</span>
+</section>
+{% else %}
+<header id="user-selector" class="identity-bar" {% if out_of_band %}hx-swap-oob="outerHTML"{% endif %}>
+    <div class="brand-row">
+        <h1>Hoopline</h1>
+        <form action="/users/logout" method="post"><button type="submit" class="btn btn-secondary">Log out</button></form>
     </div>
+    <div class="identity-summary">
+        <p class="member-greeting">You're up next, <strong class="identity-name">{{ current_user_label }}</strong></p>
+        <button type="button" class="btn btn-secondary" id="refresh-slots">Refresh slots</button>
+    </div>
+    {% if current_user_is_admin %}
+    <details class="admin-tools"><summary>Admin tools</summary>
+        <form hx-post="/admin/slots/generate" hx-target="#slots-content" hx-swap="outerHTML" hx-sync="body:drop" hx-disabled-elt="find button">
+            <button type="submit" class="btn btn-secondary">Generate next 2 weeks</button>
+        </form>
+    </details>
+    {% endif %}
 </header>
+{% endif %}
