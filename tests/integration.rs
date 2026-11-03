@@ -810,7 +810,7 @@ async fn rendered_capacity_status_and_cancellation_match_database() {
     assert!(body.contains("1/1"));
     assert!(body.contains("Booking saved. Waitlist #1."));
     assert!(body.contains("hx-confirm="));
-    assert!(body.contains("hx-disabled-elt="));
+    assert!(body.contains("hx-sync=\"body:drop\""));
     let response = app
         .oneshot(
             Request::builder()
@@ -829,12 +829,12 @@ async fn rendered_capacity_status_and_cancellation_match_database() {
 }
 
 #[tokio::test]
-async fn searchable_identity_requires_an_existing_name() {
+async fn identity_selection_requires_an_existing_id() {
     let pool = test_pool().await;
     let app = app_with_pool(pool.clone());
-    for (name, expected) in [
-        ("ben", StatusCode::SEE_OTHER),
-        ("Unknown", StatusCode::BAD_REQUEST),
+    for (id, expected) in [
+        (2, StatusCode::SEE_OTHER),
+        (999_999, StatusCode::BAD_REQUEST),
     ] {
         let response = app
             .clone()
@@ -843,7 +843,7 @@ async fn searchable_identity_requires_an_existing_name() {
                     .method("POST")
                     .uri("/users/select")
                     .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                    .body(Body::from(format!("existing_user_name={name}")))
+                    .body(Body::from(format!("selected_user_id={id}")))
                     .unwrap(),
             )
             .await
@@ -1029,7 +1029,7 @@ async fn htmx_name_selection_uses_full_page_redirect_and_persistent_cookie() {
                 .uri("/users/select")
                 .header("hx-request", "true")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from("existing_user_name=Ben"))
+                .body(Body::from("selected_user_id=2"))
                 .unwrap(),
         )
         .await
@@ -1084,4 +1084,72 @@ async fn logout_clears_identity_without_removing_bookings() {
             .await
             .contains("id=\"slots-content\"")
     );
+}
+
+#[tokio::test]
+async fn explicit_selection_uses_id_when_legacy_names_differ_only_in_case() {
+    let pool = test_pool().await;
+    let id: i64 =
+        sqlx::query_scalar("INSERT INTO users (name, is_admin) VALUES ('ben', 0) RETURNING id")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let app = app_with_pool(pool);
+    for (selected_id, name) in [(2, "Ben"), (id, "ben")] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/users/select")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(format!(
+                        "selected_user_id={selected_id}&existing_user_name={name}"
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert!(
+            response.headers()[header::SET_COOKIE]
+                .to_str()
+                .unwrap()
+                .starts_with(&format!("user_id={selected_id};"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn typed_name_without_an_explicit_selection_cannot_choose_an_account() {
+    let pool = test_pool().await;
+    sqlx::query("INSERT INTO users (name, is_admin) VALUES ('ben', 0)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let app = app_with_pool(pool);
+    for form in [
+        "existing_user_name=Ben",
+        "existing_user_name=ben",
+        "existing_user_name=BEN",
+        "existing_user_name=Alex",
+        "new_user_name=Ben",
+        "new_user_name=ben",
+        "new_user_name=BEN",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/users/select")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(!response.headers().contains_key(header::SET_COOKIE));
+    }
 }

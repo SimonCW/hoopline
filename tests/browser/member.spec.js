@@ -65,7 +65,7 @@ test('phone widths, long names, touch targets and keyboard selection', async ({ 
   await expect(page.locator('.identity-name')).toHaveText('Ben');
   await page.getByRole('button', { name: 'Log out' }).click();
   await page.locator('#new-member > summary').click();
-  await page.getByLabel('New member name', { exact: true }).fill(`Long${'name'.repeat(15)}`);
+  await page.getByLabel('New member name', { exact: true }).fill(`Long${'name'.repeat(13)}${randomUUID().slice(0, 8)}`);
   await page.getByRole('button', { name: 'Create and continue' }).click();
   await expect(page.getByRole('combobox')).toHaveCount(0);
   for (const width of [320, 390, 430]) {
@@ -100,6 +100,9 @@ test('network failure stays unchanged and permits retry', async ({ page }) => {
   await expect(card.getByRole('alert')).toContainText('Connection failed');
   await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
   await expect(card.getByRole('button', { name: 'Sign Up', exact: true })).toBeEnabled();
+  await expect(page.getByTestId('slot-card').nth(1).getByRole('button', { name: 'Sign Up', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Refresh slots' })).toBeEnabled();
+  await expect(page.locator('#booking-request-status')).toBeHidden();
 });
 
 test('slow request disables repeat submits and keeps roster open', async ({ page }) => {
@@ -131,9 +134,9 @@ test('slow request disables repeat submits and keeps roster open', async ({ page
 });
 
 test('focus refresh discovers a booking made in another session', async ({ page, request }) => {
-  const name = await createMember(page);
-  const identityResponse = await request.post('/users/select', { form: { existing_user_name: name }, maxRedirects: 0 });
-  const cookie = identityResponse.headers()['set-cookie'].split(';')[0];
+  await createMember(page);
+  const identity = (await page.context().cookies()).find(cookie => cookie.name === 'user_id');
+  const cookie = `user_id=${identity.value}`;
   const card = page.getByTestId('slot-card').first();
   const slotId = (await card.getAttribute('id')).replace('slot-', '');
   await request.post(`/slots/${slotId}/signup`, { headers: { Cookie: cookie } });
@@ -309,4 +312,120 @@ test('logout in another tab returns the overview to name selection on focus', as
   await expect(page.getByRole('combobox')).toBeVisible();
   await expect(page.getByTestId('slot-card')).toHaveCount(0);
   await otherTab.close();
+});
+
+for (const action of ['signup', 'cancel']) {
+  test(`refresh disables ${action} until the new overview has settled`, async ({ page }) => {
+    await createMember(page);
+    const card = page.getByTestId('slot-card').first();
+    if (action === 'cancel') {
+      await card.getByRole('button', { name: 'Sign Up', exact: true }).click();
+      await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+    }
+    let release;
+    let captured;
+    const gate = new Promise(resolve => { release = resolve; });
+    const capture = new Promise(resolve => { captured = resolve; });
+    await page.route('**/slots/fragment', async route => {
+      const response = await route.fetch();
+      captured();
+      await gate;
+      await route.fulfill({ response });
+    });
+    const requests = [];
+    page.on('request', request => {
+      if (request.method() === 'POST' && request.url().endsWith(`/${action}`)) requests.push(request);
+    });
+    await page.evaluate(() => { htmx.config.defaultSettleDelay = 400; window.dispatchEvent(new Event('focus')); });
+    await capture;
+    const button = card.getByRole('button', { name: action === 'signup' ? 'Sign Up' : 'Cancel booking', exact: true });
+    await expect(button).toBeDisabled();
+    await expect(page.getByTestId('slot-card').nth(1).getByRole('button', { name: 'Sign Up', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Refresh slots' })).toBeDisabled();
+    await expect(page.locator('#booking-request-status')).toContainText('Updating slots');
+    await button.evaluate(element => element.click());
+    expect(requests).toHaveLength(0);
+    release();
+    await expect(page.locator('#slots-content')).toHaveClass(/htmx-settling/);
+    await expect(button).toBeDisabled();
+    await expect(button).toBeEnabled();
+    await expect(page.locator('#booking-request-status')).toBeHidden();
+    if (action === 'cancel') page.once('dialog', dialog => dialog.accept());
+    await button.click();
+    await expect(card.getByTestId('booking-status')).toHaveText(action === 'signup' ? 'Confirmed player' : 'Not booked');
+    expect(requests).toHaveLength(1);
+    if (action === 'signup') {
+      page.once('dialog', dialog => dialog.accept());
+      await card.getByRole('button', { name: 'Cancel booking' }).click();
+      await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
+    }
+  });
+}
+
+test('a failed booking releases the shared controls on every card', async ({ page }) => {
+  await createMember(page);
+  const card = page.getByTestId('slot-card').first();
+  const otherButton = page.getByTestId('slot-card').nth(1).getByRole('button', { name: 'Sign Up', exact: true });
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route('**/slots/*/signup', async route => {
+    await gate;
+    await route.fulfill({ status: 503, contentType: 'text/html', body: '<main><p>System busy. Try again.</p></main>' });
+  });
+  await card.getByRole('button', { name: 'Sign Up', exact: true }).click();
+  await expect(otherButton).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Refresh slots' })).toBeDisabled();
+  await expect(page.locator('#booking-request-status')).toContainText('Saving changes');
+  release();
+  await expect(card.getByRole('alert')).toContainText('System busy');
+  await expect(otherButton).toBeEnabled();
+  await expect(card.getByRole('button', { name: 'Sign Up', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Refresh slots' })).toBeEnabled();
+  await expect(page.locator('#booking-request-status')).toBeHidden();
+});
+
+test('name selection submits the selected ID and editing clears it', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('combobox').fill('Ben');
+  await page.getByRole('option', { name: 'Ben', exact: true }).click();
+  const selected = page.locator('#selected-user-id');
+  await expect(selected).toHaveValue('2');
+  await expect(selected).toBeEnabled();
+  await page.getByRole('combobox').fill('Alex');
+  await expect(selected).toBeDisabled();
+  await expect(selected).toHaveValue('');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.locator('#name-step').getByRole('alert')).toContainText('Choose your name from the list');
+  await expect(page.getByTestId('slot-card')).toHaveCount(0);
+  await page.getByRole('combobox').focus();
+  await page.getByRole('option', { name: 'Alex', exact: true }).click();
+  const request = page.waitForRequest(request => request.url().endsWith('/users/select') && request.method() === 'POST');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  expect(new URLSearchParams((await request).postData()).get('selected_user_id')).toBe('1');
+  await expect(page.locator('.identity-name')).toHaveText('Alex');
+  expect((await page.context().cookies()).find(cookie => cookie.name === 'user_id').value).toBe('1');
+});
+
+test('a failed refresh restores booking controls and shows a visible error', async ({ page }) => {
+  await createMember(page);
+  let release;
+  let captured;
+  const gate = new Promise(resolve => { release = resolve; });
+  const capture = new Promise(resolve => { captured = resolve; });
+  await page.route('**/slots/fragment', async route => {
+    captured();
+    await gate;
+    await route.fulfill({ status: 503, contentType: 'text/html', body: '<main><p>Refresh failed. Try again.</p></main>' });
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await capture;
+  const button = page.getByTestId('slot-card').first().getByRole('button', { name: 'Sign Up', exact: true });
+  await expect(button).toBeDisabled();
+  await expect(page.locator('#booking-request-status')).toBeVisible();
+  release();
+  await expect(page.locator('#global-error-banner')).toContainText('Refresh failed');
+  await expect(button).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Refresh slots' })).toBeEnabled();
+  await expect(page.locator('#booking-request-status')).toBeHidden();
+  await expect(page.getByTestId('slot-card').first().getByTestId('booking-status')).toHaveText('Not booked');
 });

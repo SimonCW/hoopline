@@ -4,12 +4,13 @@
     <h1 id="welcome-title">Hoopline</h1>
     <p class="welcome-intro">Choose your name to see the next games.</p>
     <form action="/users/select" method="post" hx-post="/users/select" class="identity-form">
+        <input id="selected-user-id" name="selected_user_id" type="hidden" disabled>
         <label for="existing-user">Your name</label>
         <div class="name-search">
-            <input id="existing-user" name="existing_user_name" type="text" role="combobox" aria-autocomplete="list" aria-controls="member-matches" aria-expanded="false"
+            <input id="existing-user" type="text" role="combobox" aria-autocomplete="list" aria-controls="member-matches" aria-expanded="false"
                 autocomplete="off" autocapitalize="words" spellcheck="false" maxlength="64" required placeholder="Start typing your name" aria-describedby="identity-help search-status">
             <ul id="member-matches" class="member-matches" role="listbox" aria-label="Matching members" hidden>
-                {% for user in users %}<li id="member-option-{{ user.id }}" role="option" tabindex="-1" aria-selected="false" data-name="{{ user.name }}" hidden>{{ user.name }}</li>{% endfor %}
+                {% for user in users %}<li id="member-option-{{ user.id }}" role="option" tabindex="-1" aria-selected="false" data-user-id="{{ user.id }}" data-name="{{ user.name }}" hidden>{{ user.name }}</li>{% endfor %}
             </ul>
         </div>
         <p id="search-status" class="muted" role="status" aria-live="polite"></p>
@@ -40,7 +41,7 @@
     </div>
     {% if current_user_is_admin %}
     <details class="admin-tools"><summary>Admin tools</summary>
-        <form hx-post="/admin/slots/generate" hx-target="#slots-content" hx-swap="outerHTML" hx-sync="body:drop" hx-disabled-elt="find button">
+        <form hx-post="/admin/slots/generate" hx-target="#slots-content" hx-swap="outerHTML" hx-sync="body:drop">
             <button type="submit" class="btn btn-secondary">Generate next 2 weeks</button>
         </form>
     </details>

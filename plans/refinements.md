@@ -65,8 +65,13 @@ Member UI and UX take priority over the admin milestones below. Checked items ar
 - Keep the overview header compact: Hoopline first, Log out at the top right, and `You're up next, Name` below. Highlight the name with a high-contrast badge instead of a separate identity row.
 - Use local CSS instead of runtime Tailwind/CDN styling. HTMX remains pinned to its existing CDN version.
 - Browser tests use an isolated in-memory server on port 5051. They do not change the local preview or production database.
-- Verification passed: build, formatting, Clippy, 37 Rust tests, and 32 phone/desktop browser tests. Automated accessibility scans cover name suggestions, name forms, rosters, and confirmed booking state.
+- Verification passed: build, formatting, Clippy, 39 Rust tests, and 42 phone/desktop browser tests. Automated accessibility scans cover name suggestions, name forms, rosters, and confirmed booking state.
 - Admin editing milestones remain deferred. Existing admin endpoints remain available.
+
+### PR Review Fixes
+- Keep every booking action, admin booking action, and refresh button disabled while the shared request runs. Keep new controls disabled after HTML replacement until the update settles. Show an accessible request status and restore controls after success or failure.
+- Submit the selected member ID from the name dropdown. Clear that ID when the search text changes. Reject unselected names and existing names submitted through the new-member form instead of choosing an account by case-insensitive lookup.
+- Regression tests reproduced both review findings before the fixes. Tests now cover signup and cancellation during a delayed refresh, controls on other cards, HTML replacement, failure recovery, selection changes, and legacy names such as `Ben` and `ben`.
 
 ### Before a Real User Trial
 - [ ] Verify persistent storage and restore a backup. Remove the unsafe live-file copy fallback from the backup process.

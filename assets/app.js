@@ -7,6 +7,26 @@
     let focusAfterSwap = false;
     const openRosters = new Set();
 
+    function disableBookingControls() {
+        document.querySelectorAll('#slots-content button, #user-selector form[hx-post] button, #refresh-slots').forEach(button => {
+            // Only restore controls disabled by this request, not disabled slot states.
+            if (!button.disabled) {
+                button.dataset.requestDisabled = "";
+                button.disabled = true;
+            }
+        });
+    }
+
+    function finishRequest() {
+        pending = false;
+        document.querySelectorAll('[data-request-disabled]').forEach(button => {
+            button.disabled = false;
+            delete button.dataset.requestDisabled;
+        });
+        document.querySelectorAll('[aria-busy="true"]').forEach(el => el.removeAttribute("aria-busy"));
+        document.getElementById("booking-request-status").hidden = true;
+    }
+
     function announce(message) {
         announcement.textContent = "";
         requestAnimationFrame(() => { announcement.textContent = message; });
@@ -40,6 +60,14 @@
     });
     body.addEventListener("htmx:beforeRequest", (event) => {
         pending = true;
+        disableBookingControls();
+        if (document.getElementById("slots-content")) {
+            const status = document.getElementById("booking-request-status");
+            status.textContent = event.detail.requestConfig.verb === "get"
+                ? "Updating slots. Booking controls are temporarily unavailable."
+                : "Saving changes. Booking controls are temporarily unavailable.";
+            status.hidden = false;
+        }
         const scope = event.detail.elt.closest(".slot-card, #name-step, #user-selector") || event.detail.elt;
         scope.setAttribute("aria-busy", "true");
         scope.querySelectorAll(".request-error").forEach(error => { error.hidden = true; });
@@ -48,13 +76,17 @@
         document.querySelectorAll(".roster[open]").forEach(roster => openRosters.add(roster.id));
     });
     body.addEventListener("htmx:afterRequest", (event) => {
-        document.querySelectorAll('[aria-busy="true"]').forEach(el => el.removeAttribute("aria-busy"));
         // Successful outerHTML swaps still need to settle. A queued request on
         // the old target would otherwise disappear when that node is removed.
         if (!event.detail.successful) {
-            pending = false;
+            finishRequest();
             refreshQueued = false;
         }
+    });
+    body.addEventListener("htmx:afterSwap", () => {
+        // Replaced cards and out-of-band headers contain fresh, enabled buttons.
+        // Keep them locked until the successful request has fully settled.
+        if (pending) disableBookingControls();
     });
     body.addEventListener("htmx:responseError", (event) => {
         const doc = new DOMParser().parseFromString(event.detail.xhr.responseText, "text/html");
@@ -70,6 +102,7 @@
             const roster = document.getElementById(id);
             if (roster) roster.open = true;
         });
+        finishRequest();
         // outerHTML swaps replace the original target node.
         const target = document.getElementById(event.detail.target.id) || event.detail.target;
         const feedback = target.querySelector?.("[data-feedback]");
@@ -82,7 +115,6 @@
             focusAfterSwap = false;
             announce("Upcoming slots refreshed.");
         }
-        pending = false;
         if (refreshQueued) {
             refreshQueued = false;
             requestAnimationFrame(refresh);

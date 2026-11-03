@@ -75,7 +75,6 @@ struct UserSelectorTemplate {
 struct UserSelectionForm {
     selected_user_id: Option<i64>,
     new_user_name: Option<String>,
-    existing_user_name: Option<String>,
 }
 
 /// Builds the application router with a migrated `SQLite` connection pool.
@@ -394,34 +393,26 @@ async fn select_user(
     headers: HeaderMap,
     Form(form): Form<UserSelectionForm>,
 ) -> Result<Response, AppError> {
-    let selected_user = if let Some(new_user_name) = form.new_user_name {
+    let selected_user = if let Some(selected_user_id) = form.selected_user_id {
+        find_user_by_id(&pool, selected_user_id)
+            .await?
+            .ok_or_else(|| AppError::BadRequest("selected user does not exist".to_string()))?
+    } else if let Some(new_user_name) = form.new_user_name {
         let trimmed_name = new_user_name.trim();
         if trimmed_name.is_empty() || trimmed_name.chars().count() > 64 {
             return Err(AppError::BadRequest(
                 "Enter a name with 1 to 64 characters.".to_string(),
             ));
         }
-        if let Some(existing_user) = find_user_by_name(&pool, trimmed_name).await? {
-            existing_user
-        } else {
-            create_user(&pool, trimmed_name).await?
+        if find_user_by_name(&pool, trimmed_name).await?.is_some() {
+            return Err(AppError::BadRequest(
+                "This name already exists. Choose your name from the list.".into(),
+            ));
         }
-    } else if let Some(name) = form.existing_user_name {
-        find_user_by_name(&pool, name.trim())
-            .await?
-            .ok_or_else(|| {
-                AppError::BadRequest(
-                    "Choose your name from the list. If it is missing, use Add a new member."
-                        .into(),
-                )
-            })?
-    } else if let Some(selected_user_id) = form.selected_user_id {
-        find_user_by_id(&pool, selected_user_id)
-            .await?
-            .ok_or_else(|| AppError::BadRequest("selected user does not exist".to_string()))?
+        create_user(&pool, trimmed_name).await?
     } else {
         return Err(AppError::BadRequest(
-            "select an existing user or create a new one".to_string(),
+            "Choose your name from the list. If it is missing, use Add a new member.".to_string(),
         ));
     };
 

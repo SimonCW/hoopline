@@ -25,6 +25,7 @@ DATABASE_URL=sqlite::memory: cargo run
 
 - Upcoming slots appear in weekly groups, with compact cards for phones.
 - On the first visit, enter your name before seeing the booking overview. Fuzzy suggestions support partial names and small spelling errors. Select your existing name, or explicitly add a new member.
+- Select a suggestion before continuing. The app submits the selected member ID, not the search text. Editing the text clears the selection. Existing names cannot sign in through the new-member form.
 - The app remembers your user ID for one year in an `HttpOnly`, `SameSite=Lax` cookie. Returning visitors go straight to the overview. Names and booking details are not stored in the cookie.
 - Use **Log out** at the top right if you selected the wrong name or use a shared device. This clears the cookie, not your bookings. Name selection is not authentication.
 - Expand **Who's playing?** to see the player list and ordered waitlist.
@@ -33,6 +34,7 @@ DATABASE_URL=sqlite::memory: cargo run
 - New schedule times use `Europe/Berlin`, including daylight-saving changes. Dates show local times without a time-zone label.
 - Existing slots retain their stored instant and bookings after migration. Review legacy slot times separately; they are not silently moved. Generation does not create a duplicate for the same venue and local date.
 - Returning to the page refreshes slot state and the selected identity. **Refresh slots** updates them manually.
+- Booking and refresh controls stay disabled during shared requests, including page updates. A visible status explains the wait. Failed requests restore the controls and show an error.
 - Set `COOKIE_SECURE=true` in an HTTPS deployment so the browser sends the identity cookie only over HTTPS. Leave it unset for local HTTP previews.
 
 ### Checks

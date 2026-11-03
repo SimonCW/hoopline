@@ -2,6 +2,7 @@
 (() => {
     const input = document.getElementById("existing-user");
     const list = document.getElementById("member-matches");
+    const selectedUser = document.getElementById("selected-user-id");
     if (!input || !list) return;
     const options = [...list.querySelectorAll("[data-name]")];
     const status = document.getElementById("search-status");
@@ -71,12 +72,18 @@
 
     function select(option) {
         input.value = option.dataset.name;
+        selectedUser.value = option.dataset.userId;
+        selectedUser.disabled = false;
         input.focus({ preventScroll: true });
         close();
         status.textContent = `${input.value} selected. Choose Continue.`;
     }
 
-    input.addEventListener("input", update);
+    input.addEventListener("input", () => {
+        selectedUser.value = "";
+        selectedUser.disabled = true;
+        update();
+    });
     input.addEventListener("focus", update);
     input.addEventListener("keydown", event => {
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {

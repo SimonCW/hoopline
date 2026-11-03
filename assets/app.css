@@ -84,9 +84,9 @@ input { width: 100%; min-width: 0; min-height: 48px; border-radius: .6rem; borde
 .feedback, .request-error { padding: .75rem; margin-top: .75rem; border-radius: .5rem; overflow-wrap: anywhere; }
 .feedback { background: #e5f2eb; color: #104e36; }
 .request-error { background: #fff0ef; border: 1px solid #b43d34; color: #7b211b; }
+.request-status { padding: .65rem .8rem; margin-bottom: .75rem; background: #e5f2eb; color: #104e36; border-radius: .5rem; font-size: .85rem; }
 .htmx-indicator { display: none; color: var(--muted); font-size: .85rem; }
-.htmx-request > .htmx-indicator, .htmx-request .htmx-indicator { display: inline; }
-[aria-busy="true"] .htmx-indicator { display: inline; opacity: 1; }
+.slot-card[aria-busy="true"] .htmx-indicator, #name-step[aria-busy="true"] > .htmx-indicator { display: inline; opacity: 1; }
 .empty-state { display: grid; gap: .75rem; }
 footer { color: var(--muted); text-align: center; font-size: .8rem; padding: 2rem 0 .5rem; }
 .sr-only, .skip-link:not(:focus) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }

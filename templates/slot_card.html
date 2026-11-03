@@ -1,5 +1,5 @@
 <article id="slot-{{ slot.id }}" class="card slot-card" data-testid="slot-card" aria-labelledby="slot-title-{{ slot.id }}"
-    hx-target="this" hx-swap="outerHTML" hx-sync="body:drop" hx-disabled-elt="find button">
+    hx-target="this" hx-swap="outerHTML" hx-sync="body:drop">
     <div class="slot-heading">
         <div>
             <h3 id="slot-title-{{ slot.id }}" tabindex="-1">{{ slot.datetime_label_de() }}</h3>
