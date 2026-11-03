@@ -2,7 +2,62 @@
 
 ## Goal
 
-Capture follow-up improvements after the current MVP to make admin operations faster, safer, and more practical during real weekly usage.
+Improve the normal member experience first. Focus on clear slot information, simple booking actions, and mobile use. Delay admin editing work until the member flow is ready.
+
+---
+
+## Repository Review and Member UX Priorities (2026-11-03)
+
+### Current Status
+- The core MVP is implemented: name selection, self-registration, signup, cancellation, automatic waitlist promotion, and admin removal/promotion.
+- SQLite persistence, Docker deployment files, and a backup script exist. The live deployment and backup restoration were not verified.
+- R2 layout tasks are complete. R1, R3, and R4 remain open and are now deferred.
+- Rust stable was updated to 1.99.1 on the review machine. Build, formatting, Clippy, and all 22 tests passed.
+- The local browser check showed no horizontal overflow at 390px width. This does not replace a full mobile usability test. The favicon is missing.
+- Slot generation runs at startup or through an admin action. There is no periodic renewal job. Past slots remain visible and booking endpoints do not reject past slots.
+- Schedules and displayed times use UTC. German local time and daylight-saving rules need a clear decision.
+- Capacity is enforced from database values, but the UI assumes 15 players and 5 waitlist places.
+- Identity selection has no authentication. Anyone can select an admin identity. This matches the original plan but does not prevent impersonation.
+- Sample users, slots, and bookings are part of the initial migration. Separate demo data from production setup before a user trial.
+
+### Recommended Work Order
+
+These are recommendations, not completed features. Member UI and UX take priority over the admin milestones below.
+
+#### 1. Make Slot Information Reliable
+- [ ] Show upcoming slots only. Reject new bookings for slots that have started.
+- [ ] Renew the booking window automatically without requiring a restart or admin action. Confirm whether slots open on a rolling basis or on Sunday evenings.
+- [ ] Confirm the intended local time zone. Generate and display local times correctly across daylight-saving changes.
+- [ ] Use database capacity values for counts, labels, and available places.
+
+#### 2. Make the Mobile Slot List Easy to Scan
+- [ ] Group slots by week and keep chronological order. Use clear date, time, and venue labels.
+- [ ] Show availability at the top of each card, such as `9/15 players` and `2/5 waitlist`.
+- [ ] Reduce empty-row space. Keep booked names visible and offer a way to expand full lists if needed. Test this against the group's spreadsheet-style view before replacing it.
+- [ ] Show a clear booking status on each card: not booked, confirmed, waitlist position, or full. Do not rely on row color alone.
+- [ ] Use one consistent interface language. Confirm whether members prefer German.
+
+#### 3. Make Identity and Booking Actions Clear
+- [ ] Use a compact identity header after name selection. Keep a clear `Change name` action.
+- [ ] Make existing names searchable. Keep new-user creation behind an explicit action to reduce accidental duplicate identities.
+- [ ] Keep the primary action near the slot summary: `Sign up`, `Join waitlist`, or `Cancel booking`.
+- [ ] Explain waitlist behavior before joining. State that cancellation automatically promotes the first person in line.
+- [ ] Show local success feedback after each action, including the resulting booking status or waitlist position.
+- [ ] Prevent repeated submissions while a request is pending. Keep errors near the affected slot and announce status changes to screen readers.
+- [ ] Protect against accidental cancellation with a short confirmation. Do not promise undo unless queue fairness can be preserved.
+
+#### 4. Test the Complete Member Flow
+- [ ] Test name selection, signup, waitlisting, cancellation, and promotion on phone and desktop browsers.
+- [ ] Test keyboard navigation, visible focus, contrast, readable names, and touch targets.
+- [ ] Refresh booking state when the page regains focus so returning members do not act on stale availability.
+- [ ] Test simultaneous signups with a file-backed database. Handle conflicts with clear retry feedback.
+- [ ] Test slow networks and failed requests. Confirm that failed actions do not show success or change the displayed booking state.
+
+### Before a Real User Trial
+- [ ] Verify persistent storage and restore a backup. Remove the unsafe live-file copy fallback from the backup process.
+- [ ] Confirm the no-auth access policy, especially admin identity selection.
+- [ ] Separate sample data from production data and verify the deployed app.
+- [ ] Add repeatable CI checks and document the required Rust toolchain.
 
 ---
 
@@ -99,4 +154,4 @@ Capture follow-up improvements after the current MVP to make admin operations fa
 
 - Keep the user path simple: members should still only select their identity and sign up/cancel their own booking.
 - Admin controls should be intentionally gated behind explicit mode switching.
-- Prefer incremental rollout: ship R1 first before adding batching/audit complexity.
+- Ship member UX improvements first. Then resume R1 before adding R3 batching or R4 audit features.
