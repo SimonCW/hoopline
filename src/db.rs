@@ -164,7 +164,9 @@ pub(crate) async fn edit_game(pool: &SqlitePool, edit: &GameEdit) -> Result<(), 
     let old = DateTime::parse_from_rfc3339(&old_datetime)
         .map_err(|_| AppError::BadRequest("The existing game time is invalid.".into()))?;
     if old.with_timezone(&Utc) <= Utc::now() {
-        return Err(AppError::BadRequest("This game has already started.".into()));
+        return Err(AppError::BadRequest(
+            "This game has already started.".into(),
+        ));
     }
     if old.with_timezone(&Utc) == edit.datetime && old_venue == edit.venue {
         return Ok(());
@@ -704,10 +706,10 @@ pub(crate) async fn promote_waitlist_checked(
     let Some(slot) = slot else {
         return Ok(PromoteOutcome::SlotNotFound);
     };
-    if let Some(revision) = revision {
-        if slot.try_get::<i64, _>("revision")? != revision {
-            return Ok(PromoteOutcome::Stale);
-        }
+    if let Some(revision) = revision
+        && slot.try_get::<i64, _>("revision")? != revision
+    {
+        return Ok(PromoteOutcome::Stale);
     }
     let max_players: i64 = slot.try_get("max_players")?;
 
@@ -784,16 +786,16 @@ async fn cancellation_slot_status(
     revision: Option<i64>,
 ) -> Result<Option<CancelOutcome>, sqlx::Error> {
     let slot = sqlx::query("SELECT revision FROM slots WHERE id = ?")
-    .bind(slot_id)
-    .fetch_optional(&mut **tx)
-    .await?;
+        .bind(slot_id)
+        .fetch_optional(&mut **tx)
+        .await?;
     let Some(slot) = slot else {
         return Ok(Some(CancelOutcome::SlotNotFound));
     };
-    if let Some(revision) = revision {
-        if slot.try_get::<i64, _>("revision")? != revision {
-            return Ok(Some(CancelOutcome::Stale));
-        }
+    if let Some(revision) = revision
+        && slot.try_get::<i64, _>("revision")? != revision
+    {
+        return Ok(Some(CancelOutcome::Stale));
     }
     Ok(None)
 }

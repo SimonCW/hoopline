@@ -41,7 +41,7 @@ DATABASE_URL=sqlite::memory: cargo run
 ### Admin mode
 
 - Admin identities can switch between member view and admin mode. Name selection is not authentication; anyone who can select an admin name can use these controls.
-- Admins can add or remove members and reorder the waitlist. Removing a player promotes the first waiting member. Adding a player ahead of the waitlist is an explicit override.
+- Admins can add or remove members and reorder the waitlist. Removing a player promotes the first waiting member. Adding a player ahead of the waitlist is an explicit override. These roster controls also work for games that already started.
 - **Edit this game** changes one occurrence. When bookings exist, the admin must choose whether to keep or clear them. Clearing removes players and waitlist members without notifications.
 - **Edit recurring schedule** changes defaults for newly generated games only. Existing games and bookings stay unchanged. Pausing a schedule does not remove published games. Previously opened games remain available when the release time changes.
 

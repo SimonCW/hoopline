@@ -201,7 +201,9 @@ async fn stale_admin_remove_and_promote_leave_bookings_unchanged() {
 async fn admin_roster_actions_work_after_a_game_starts() {
     let pool = test_pool().await;
     sqlx::query("UPDATE slots SET datetime = '2000-01-01T20:00:00Z' WHERE id = 1")
-        .execute(&pool).await.unwrap();
+        .execute(&pool)
+        .await
+        .unwrap();
     let app = app_with_pool(pool.clone());
     for (uri, body) in [
         ("/admin/slots/1/add", "user_id=7&revision=0&list=waitlist"),
@@ -210,10 +212,20 @@ async fn admin_roster_actions_work_after_a_game_starts() {
         ("/admin/slots/1/promote/8", "revision=3"),
         ("/admin/slots/1/remove/2", "revision=4"),
     ] {
-        let response = app.clone().oneshot(Request::builder().method("POST").uri(uri)
-            .header(header::COOKIE, "user_id=1").header("x-hoopline-user", "1")
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(Body::from(body)).unwrap()).await.unwrap();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header(header::COOKIE, "user_id=1")
+                    .header("x-hoopline-user", "1")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK, "{uri}");
     }
     let slot = db::find_slot(&pool, 1).await.unwrap().unwrap();

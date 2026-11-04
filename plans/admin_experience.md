@@ -48,7 +48,7 @@ The user approved the simpler three-increment delivery, browser tests, editor be
 - Remove uses a confirmation. Removing a player retains the existing first-waiter promotion behavior. Removing a waiter closes the queue gap.
 - Keep the existing Promote action when player space exists. It appends to Players and closes the queue gap.
 - Up/Down swaps with the adjacent waiter only. Disable Up at the top and Down at the bottom. Server rejects an invalid edge move without changing data.
-- All roster mutations reject started slots. Keep legacy member cancellation behavior unchanged unless a separate change is approved.
+- Update 2026-11-04: admin roster mutations may run after a game starts. The started-slot restriction is removed to keep the code simple. Member signup and cancellation rules are unchanged, and the game editor still rejects edits to a game that already started.
 
 ### Edit This Game
 
@@ -212,7 +212,7 @@ Files: `src/lib.rs`; `src/identity.rs` if needed; current overview/header/card t
 - [ ] Add typed list/direction inputs and transactional add/reorder functions.
 - [ ] Add routes and form controls for existing members and adjacent waitlist movement.
 - [ ] Include self-removal and self-addition; remove current template exclusions for the admin's own rows in Admin mode only.
-- [ ] Apply started-slot rule to all admin roster operations.
+- [x] Approve and remove the started-slot restriction for admin roster operations; keep member signup and cancellation rules unchanged.
 - [ ] Tests: append to either list; capacity; duplicate; missing user; queue swap in both directions; edge rejection; removal promotion; admin self-management; stale revision; no partial writes.
 - [ ] File-backed concurrency tests: simultaneous admin add/member signup cannot overfill; stale reorder after promotion fails; revision increments remain correct.
 - [ ] Coordinate these tests with explicit barriers/channels or a held SQLite write transaction. Do not use sleeps to assume request ordering.
