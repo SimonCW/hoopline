@@ -34,6 +34,7 @@ DATABASE_URL=sqlite::memory: cargo run
 - New schedule times use `Europe/Berlin`, including daylight-saving changes. Dates show local times without a time-zone label.
 - Existing slots retain their stored instant and bookings after migration. Review legacy slot times separately; they are not silently moved. Generation does not create a duplicate for the same venue and local date.
 - Returning to the page refreshes slot state and the selected identity. **Refresh slots** updates them manually.
+- Booking actions are tied to the member shown on the page. If another tab changes the selected user, stale actions return an error without changing bookings. Refresh before trying again.
 - Booking and refresh controls stay disabled during shared requests, including page updates. Disabled buttons turn gray. A CSS refresh icon rotates only while the overview updates, without changing the button size. Reduced-motion mode keeps the icon still. Screen readers receive status updates. Errors remain visible.
 - Set `COOKIE_SECURE=true` in an HTTPS deployment so the browser sends the identity cookie only over HTTPS. Leave it unset for local HTTP previews.
 
@@ -58,6 +59,12 @@ just test-ui
 Without `just`, use `npm run test:ui`. Tests start a disposable server on port 5051. They cover phone and desktop layouts, booking and promotion, keyboard use, automated accessibility checks, slow requests, request failures, and focus refreshes. Rust tests also cover daylight-saving changes and simultaneous signups against a file-backed database.
 
 The app serves its CSS locally. Booking controls need JavaScript and the pinned HTMX script from jsDelivr.
+
+### Identity checks for booking actions
+
+`src/identity.rs` provides private-field `BookingIdentity` and `AdminIdentity` extractors. Booking handlers require a validated `BookingIdentity`. Admin handlers also require the database admin flag through `AdminIdentity`.
+
+HTMX sends the rendered member ID in `X-Hoopline-User`. The extractor checks this numeric ID against the current cookie and database record before the handler runs. Missing or mismatched IDs return HTTP 409 with a refresh instruction. This prevents stale-page mistakes; it is not authentication. Direct API clients must send the same header with booking actions.
 
 ## SQLite in production (Hostim)
 

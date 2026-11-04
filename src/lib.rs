@@ -1,5 +1,6 @@
 pub mod db;
 pub mod error;
+mod identity;
 pub mod models;
 
 use crate::{
@@ -8,6 +9,7 @@ use crate::{
         create_upcoming_slots, create_user, find_slot, find_user_by_id, find_user_by_name,
         list_slots, list_users, promote_waitlist_user, signup_for_slot,
     },
+    identity::{AdminIdentity, BookingIdentity, current_user_from_headers},
     models::{Slot, SlotWeek, UserIdentity, group_slots},
 };
 use askama::Template;
@@ -200,13 +202,9 @@ async fn slots_fragment(
 async fn signup_slot(
     State(pool): State<SqlitePool>,
     Path(slot_id): Path<i64>,
-    headers: HeaderMap,
+    current_user: BookingIdentity,
 ) -> Result<Html<String>, AppError> {
-    let current_user = current_user_from_headers(&pool, &headers)
-        .await?
-        .ok_or_else(|| AppError::BadRequest("select your name first".to_string()))?;
-
-    match signup_for_slot(&pool, slot_id, current_user.id).await? {
+    match signup_for_slot(&pool, slot_id, current_user.id()).await? {
         SignupOutcome::AddedPlayer | SignupOutcome::AddedWaitlist => {}
         SignupOutcome::AlreadySignedUp => {
             return Err(AppError::BadRequest(
@@ -234,11 +232,11 @@ async fn signup_slot(
     let template = SlotCardTemplate {
         feedback: format!(
             "Booking saved. {}.",
-            slot.booking_status(&Some(current_user.id))
+            slot.booking_status(&Some(current_user.id()))
         ),
         slot,
-        current_user_id: Some(current_user.id),
-        current_user_is_admin: current_user.is_admin,
+        current_user_id: Some(current_user.id()),
+        current_user_is_admin: current_user.is_admin(),
     };
     Ok(Html(template.render()?))
 }
@@ -246,13 +244,9 @@ async fn signup_slot(
 async fn cancel_slot(
     State(pool): State<SqlitePool>,
     Path(slot_id): Path<i64>,
-    headers: HeaderMap,
+    current_user: BookingIdentity,
 ) -> Result<Html<String>, AppError> {
-    let current_user = current_user_from_headers(&pool, &headers)
-        .await?
-        .ok_or_else(|| AppError::BadRequest("select your name first".to_string()))?;
-
-    match cancel_booking_for_slot(&pool, slot_id, current_user.id).await? {
+    match cancel_booking_for_slot(&pool, slot_id, current_user.id()).await? {
         CancelOutcome::Cancelled => {}
         CancelOutcome::NotSignedUp => {
             return Err(AppError::BadRequest(
@@ -270,8 +264,8 @@ async fn cancel_slot(
     let template = SlotCardTemplate {
         feedback: "Booking cancelled. You are no longer on this list.".into(),
         slot,
-        current_user_id: Some(current_user.id),
-        current_user_is_admin: current_user.is_admin,
+        current_user_id: Some(current_user.id()),
+        current_user_is_admin: current_user.is_admin(),
     };
     Ok(Html(template.render()?))
 }
@@ -279,10 +273,8 @@ async fn cancel_slot(
 async fn admin_remove_slot_user(
     State(pool): State<SqlitePool>,
     Path((slot_id, user_id)): Path<(i64, i64)>,
-    headers: HeaderMap,
+    current_user: AdminIdentity,
 ) -> Result<Html<String>, AppError> {
-    let current_user = current_admin_from_headers(&pool, &headers).await?;
-
     match cancel_booking_for_slot(&pool, slot_id, user_id).await? {
         CancelOutcome::Cancelled => {}
         CancelOutcome::NotSignedUp => {
@@ -301,7 +293,7 @@ async fn admin_remove_slot_user(
     let template = SlotCardTemplate {
         feedback: "Player removed. The waitlist has been updated.".into(),
         slot,
-        current_user_id: Some(current_user.id),
+        current_user_id: Some(current_user.id()),
         current_user_is_admin: true,
     };
     Ok(Html(template.render()?))
@@ -310,10 +302,8 @@ async fn admin_remove_slot_user(
 async fn admin_promote_waitlist_user(
     State(pool): State<SqlitePool>,
     Path((slot_id, user_id)): Path<(i64, i64)>,
-    headers: HeaderMap,
+    current_user: AdminIdentity,
 ) -> Result<Html<String>, AppError> {
-    let current_user = current_admin_from_headers(&pool, &headers).await?;
-
     match promote_waitlist_user(&pool, slot_id, user_id).await? {
         PromoteOutcome::Promoted => {}
         PromoteOutcome::NotWaitlisted => {
@@ -337,7 +327,7 @@ async fn admin_promote_waitlist_user(
     let template = SlotCardTemplate {
         feedback: "Waitlist player promoted.".into(),
         slot,
-        current_user_id: Some(current_user.id),
+        current_user_id: Some(current_user.id()),
         current_user_is_admin: true,
     };
     Ok(Html(template.render()?))
@@ -345,13 +335,12 @@ async fn admin_promote_waitlist_user(
 
 async fn admin_generate_slots(
     State(pool): State<SqlitePool>,
-    headers: HeaderMap,
+    current_user: AdminIdentity,
 ) -> Result<Html<String>, AppError> {
-    let current_user = current_admin_from_headers(&pool, &headers).await?;
     create_upcoming_slots(&pool, Utc::now()).await?;
     let template = SlotsContentTemplate {
         identity_refresh_html: String::new(),
-        current_user_id: Some(current_user.id),
+        current_user_id: Some(current_user.id()),
         current_user_is_admin: true,
         weeks: group_slots(list_slots(&pool).await?),
     };
@@ -477,40 +466,6 @@ async fn name_search_js() -> impl IntoResponse {
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         include_str!("../assets/name-search.js"),
     )
-}
-
-async fn current_user_from_headers(
-    pool: &SqlitePool,
-    headers: &HeaderMap,
-) -> Result<Option<UserIdentity>, AppError> {
-    if let Some(user_id) = user_id_from_cookie(headers) {
-        return find_user_by_id(pool, user_id).await.map_err(AppError::from);
-    }
-    Ok(None)
-}
-
-async fn current_admin_from_headers(
-    pool: &SqlitePool,
-    headers: &HeaderMap,
-) -> Result<UserIdentity, AppError> {
-    let current_user = current_user_from_headers(pool, headers)
-        .await?
-        .ok_or_else(|| AppError::Forbidden("admin access required".to_string()))?;
-    if !current_user.is_admin {
-        return Err(AppError::Forbidden("admin access required".to_string()));
-    }
-    Ok(current_user)
-}
-
-fn user_id_from_cookie(headers: &HeaderMap) -> Option<i64> {
-    let raw_cookie = headers.get(header::COOKIE)?.to_str().ok()?;
-    raw_cookie
-        .split(';')
-        .find_map(|part| {
-            let (name, value) = part.trim().split_once('=')?;
-            (name == "user_id").then_some(value)
-        })
-        .and_then(|value| value.parse::<i64>().ok())
 }
 
 fn user_cookie_header_value(user_id: i64) -> Result<HeaderValue, AppError> {

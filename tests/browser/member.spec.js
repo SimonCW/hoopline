@@ -152,7 +152,7 @@ test('focus refresh discovers a booking made in another session', async ({ page,
   const cookie = `user_id=${identity.value}`;
   const card = page.getByTestId('slot-card').first();
   const slotId = (await card.getAttribute('id')).replace('slot-', '');
-  await request.post(`/slots/${slotId}/signup`, { headers: { Cookie: cookie } });
+  await request.post(`/slots/${slotId}/signup`, { headers: { Cookie: cookie, 'X-Hoopline-User': identity.value } });
   await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
@@ -172,13 +172,13 @@ test('waitlist status updates after automatic promotion', async ({ page, request
       const response = await request.post('/users/select', { form: { new_user_name: `Fill ${randomUUID().slice(0, 8)}` }, maxRedirects: 0 });
       const cookie = response.headers()['set-cookie'].split(';')[0];
       cookies.push(cookie);
-      expect((await request.post(`/slots/${slotId}/signup`, { headers: { Cookie: cookie } })).ok()).toBe(true);
+      expect((await request.post(`/slots/${slotId}/signup`, { headers: { Cookie: cookie, 'X-Hoopline-User': cookie.split('=')[1] } })).ok()).toBe(true);
     }
     await page.getByRole('button', { name: 'Refresh slots' }).click();
     await card.getByRole('button', { name: 'Join Waitlist', exact: true }).click();
     await expect(card.getByTestId('booking-status')).toHaveText('Waitlist #1');
     await expect(card.locator('[data-feedback]')).toContainText('Waitlist #1');
-    await request.post(`/slots/${slotId}/cancel`, { headers: { Cookie: cookies[0] } });
+    await request.post(`/slots/${slotId}/cancel`, { headers: { Cookie: cookies[0], 'X-Hoopline-User': cookies[0].split('=')[1] } });
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
     await card.locator('.roster > summary').click();
@@ -187,7 +187,7 @@ test('waitlist status updates after automatic promotion', async ({ page, request
     await card.getByRole('button', { name: 'Cancel booking' }).click();
     await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
   } finally {
-    for (const cookie of cookies) await request.post(`/slots/${slotId}/cancel`, { headers: { Cookie: cookie } });
+    for (const cookie of cookies) await request.post(`/slots/${slotId}/cancel`, { headers: { Cookie: cookie, 'X-Hoopline-User': cookie.split('=')[1] } });
   }
 });
 
@@ -539,3 +539,59 @@ test('refresh has a CSS activity icon and clear disabled colors without layout s
   await expect(icon).toHaveCSS('animation-name', 'none');
   expect(await refresh.boundingBox()).toEqual(before);
 });
+
+for (const action of ['signup', 'cancel']) {
+  test(`failed identity refresh cannot ${action} under another member's cookie`, async ({ page, context, request }) => {
+    const oldName = await createMember(page);
+    const oldId = (await context.cookies()).find(cookie => cookie.name === 'user_id').value;
+    const card = page.getByTestId('slot-card').first();
+    const slotId = (await card.getAttribute('id')).replace('slot-', '');
+    if (action === 'cancel') {
+      await card.getByRole('button', { name: 'Sign Up', exact: true }).click();
+      await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+    }
+    await page.route('**/slots/fragment', route => route.fulfill({
+      status: 503, contentType: 'text/html', body: '<main><p>Refresh failed. Try again.</p></main>',
+    }));
+    const otherTab = await context.newPage();
+    await otherTab.goto('/');
+    await otherTab.getByRole('button', { name: 'Log out' }).click();
+    const newName = await createMember(otherTab);
+    const newId = (await context.cookies()).find(cookie => cookie.name === 'user_id').value;
+    expect(newId).not.toBe(oldId);
+    if (action === 'cancel') {
+      await otherTab.getByTestId('slot-card').first().getByRole('button', { name: 'Sign Up', exact: true }).click();
+      await expect(otherTab.getByTestId('slot-card').first().getByTestId('booking-status')).toHaveText('Confirmed player');
+    }
+    await page.bringToFront();
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(page.locator('#global-error-banner')).toContainText('Refresh failed');
+    await expect(page.locator('.identity-name')).toHaveText(oldName);
+    const response = page.waitForResponse(response => response.url().endsWith(`/slots/${slotId}/${action}`));
+    if (action === 'cancel') page.once('dialog', dialog => dialog.accept());
+    await card.getByRole('button', { name: action === 'signup' ? 'Sign Up' : 'Cancel booking', exact: true }).click();
+    const rejected = await response;
+    expect(rejected.status()).toBe(409);
+    const headers = await rejected.request().allHeaders();
+    expect(headers['x-hoopline-user']).toBe(oldId);
+    expect(headers.cookie).toContain(`user_id=${newId}`);
+    await expect(card.getByRole('alert')).toContainText('Your selected name changed');
+    await expect(card.getByTestId('booking-status')).toHaveText(action === 'signup' ? 'Not booked' : 'Confirmed player');
+    // Both accounts must be unchanged, not merely the stale card in this tab.
+    for (const id of [oldId, newId]) {
+      const headers = { Cookie: `user_id=${id}`, 'X-Hoopline-User': id };
+      if (action === 'signup') expect((await request.post(`/slots/${slotId}/signup`, { headers })).ok()).toBe(true);
+      expect((await request.post(`/slots/${slotId}/cancel`, { headers })).ok()).toBe(true);
+    }
+    await page.unroute('**/slots/fragment');
+    await page.getByRole('button', { name: 'Refresh slots' }).click();
+    await expect(page.locator('.identity-name')).toHaveText(newName);
+    await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
+    await card.getByRole('button', { name: 'Sign Up', exact: true }).click();
+    await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+    page.once('dialog', dialog => dialog.accept());
+    await card.getByRole('button', { name: 'Cancel booking' }).click();
+    await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
+    await otherTab.close();
+  });
+}

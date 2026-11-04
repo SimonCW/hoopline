@@ -282,6 +282,7 @@ async fn post_slots_signup_adds_player_and_highlights_current_user() {
                 .method("POST")
                 .uri("/slots/3/signup")
                 .header(header::COOKIE, "user_id=6")
+                .header("x-hoopline-user", "6")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -324,6 +325,7 @@ async fn post_slots_signup_routes_to_waitlist_when_players_are_full() {
                 .method("POST")
                 .uri("/slots/2/signup")
                 .header(header::COOKIE, "user_id=8")
+                .header("x-hoopline-user", "8")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -361,6 +363,7 @@ async fn post_slots_signup_rejects_when_slot_and_waitlist_are_full() {
                 .method("POST")
                 .uri("/slots/2/signup")
                 .header(header::COOKIE, "user_id=8")
+                .header("x-hoopline-user", "8")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -390,6 +393,7 @@ async fn post_slots_signup_rejects_duplicate_user() {
                 .method("POST")
                 .uri("/slots/1/signup")
                 .header(header::COOKIE, "user_id=1")
+                .header("x-hoopline-user", "1")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -418,6 +422,7 @@ async fn post_slots_cancel_promotes_waitlist_after_player_cancel() {
                 .method("POST")
                 .uri("/slots/1/cancel")
                 .header(header::COOKIE, "user_id=2")
+                .header("x-hoopline-user", "2")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -477,6 +482,7 @@ async fn post_slots_cancel_shifts_waitlist_after_waitlist_cancel() {
                 .method("POST")
                 .uri("/slots/3/cancel")
                 .header(header::COOKIE, "user_id=4")
+                .header("x-hoopline-user", "4")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -517,6 +523,7 @@ async fn post_admin_remove_rejects_non_admin() {
                 .method("POST")
                 .uri("/admin/slots/1/remove/2")
                 .header(header::COOKIE, "user_id=2")
+                .header("x-hoopline-user", "2")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -544,6 +551,7 @@ async fn post_admin_remove_triggers_waitlist_promotion() {
                 .method("POST")
                 .uri("/admin/slots/1/remove/2")
                 .header(header::COOKIE, "user_id=1")
+                .header("x-hoopline-user", "1")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -594,6 +602,7 @@ async fn post_admin_promote_moves_target_from_waitlist_to_players() {
                 .method("POST")
                 .uri("/admin/slots/3/promote/4")
                 .header(header::COOKIE, "user_id=1")
+                .header("x-hoopline-user", "1")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -634,6 +643,7 @@ async fn post_admin_generate_slots_rejects_non_admin() {
                 .method("POST")
                 .uri("/admin/slots/generate")
                 .header(header::COOKIE, "user_id=2")
+                .header("x-hoopline-user", "2")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -660,6 +670,7 @@ async fn post_admin_generate_slots_creates_future_slots() {
                 .method("POST")
                 .uri("/admin/slots/generate")
                 .header(header::COOKIE, "user_id=1")
+                .header("x-hoopline-user", "1")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -697,6 +708,7 @@ async fn e2e_signup_cancel_and_promotion_flow() {
                 .method("POST")
                 .uri("/slots/1/signup")
                 .header(header::COOKIE, "user_id=9")
+                .header("x-hoopline-user", "9")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -710,6 +722,7 @@ async fn e2e_signup_cancel_and_promotion_flow() {
                 .method("POST")
                 .uri("/slots/1/cancel")
                 .header(header::COOKIE, "user_id=2")
+                .header("x-hoopline-user", "2")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -766,6 +779,7 @@ async fn past_slots_are_hidden_and_reject_direct_signup() {
                 .method("POST")
                 .uri("/slots/1/signup")
                 .header(header::COOKIE, "user_id=7")
+                .header("x-hoopline-user", "7")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -800,6 +814,7 @@ async fn rendered_capacity_status_and_cancellation_match_database() {
                 .method("POST")
                 .uri("/slots/1/signup")
                 .header(header::COOKIE, "user_id=7")
+                .header("x-hoopline-user", "7")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -817,6 +832,7 @@ async fn rendered_capacity_status_and_cancellation_match_database() {
                 .method("POST")
                 .uri("/slots/1/cancel")
                 .header(header::COOKIE, "user_id=7")
+                .header("x-hoopline-user", "7")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1151,5 +1167,124 @@ async fn typed_name_without_an_explicit_selection_cannot_choose_an_account() {
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert!(!response.headers().contains_key(header::SET_COOKIE));
+    }
+}
+
+async fn booking_state(pool: &sqlx::SqlitePool) -> Vec<(i64, i64, i64, i64)> {
+    sqlx::query("SELECT slot_id, user_id, position, is_waitlist FROM bookings ORDER BY id")
+        .fetch_all(pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| {
+            (
+                row.get("slot_id"),
+                row.get("user_id"),
+                row.get("position"),
+                row.get("is_waitlist"),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn stale_displayed_identity_cannot_change_bookings_or_generate_slots() {
+    let pool = test_pool().await;
+    insert_waitlist_booking(&pool, 3, 4, 1).await;
+    let app = app_with_pool(pool.clone());
+    let before = booking_state(&pool).await;
+    let slots_before: i64 = sqlx::query_scalar("SELECT count(*) FROM slots")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    for (uri, cookie, displayed_id) in [
+        ("/slots/3/signup", "user_id=6", "7"),
+        ("/slots/1/cancel", "user_id=2", "1"),
+        ("/admin/slots/1/remove/2", "user_id=1", "2"),
+        ("/admin/slots/3/promote/4", "user_id=1", "2"),
+        ("/admin/slots/generate", "user_id=1", "2"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header(header::COOKIE, cookie)
+                    .header("x-hoopline-user", displayed_id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT, "{uri}");
+        assert!(
+            response_body_string(response)
+                .await
+                .contains("Your selected name changed")
+        );
+        assert_eq!(booking_state(&pool).await, before, "{uri}");
+        let slots_after: i64 = sqlx::query_scalar("SELECT count(*) FROM slots")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(slots_after, slots_before);
+    }
+}
+
+#[tokio::test]
+async fn missing_or_invalid_displayed_identity_cannot_modify_bookings() {
+    let pool = test_pool().await;
+    let app = app_with_pool(pool.clone());
+    let before = booking_state(&pool).await;
+    for displayed in [None, Some(""), Some("not-an-id"), Some("999999")] {
+        for (uri, cookie) in [
+            ("/slots/3/signup", "user_id=6"),
+            ("/slots/3/cancel", "user_id=6"),
+            ("/admin/slots/1/remove/2", "user_id=1"),
+            ("/admin/slots/3/promote/4", "user_id=1"),
+            ("/admin/slots/generate", "user_id=1"),
+        ] {
+            let mut request = Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::COOKIE, cookie);
+            if let Some(id) = displayed {
+                request = request.header("x-hoopline-user", id);
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CONFLICT);
+            assert_eq!(booking_state(&pool).await, before);
+        }
+    }
+}
+
+#[tokio::test]
+async fn logged_out_or_deleted_cookie_cannot_act_on_a_remembered_page() {
+    let pool = test_pool().await;
+    let app = app_with_pool(pool.clone());
+    let before = booking_state(&pool).await;
+    for cookie in ["", "user_id=", "user_id=invalid", "user_id=999999"] {
+        for uri in ["/slots/3/signup", "/slots/3/cancel"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(uri)
+                        .header(header::COOKIE, cookie)
+                        .header("x-hoopline-user", "6")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CONFLICT);
+            assert_eq!(booking_state(&pool).await, before);
+        }
     }
 }
