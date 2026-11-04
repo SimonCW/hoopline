@@ -27,10 +27,9 @@
         {% else %}
         <p>Player list and waitlist are full.</p>
         {% endif %}
-        <span class="htmx-indicator" role="status">Saving…</span>
     </div>
     {% if !feedback.is_empty() %}
-    <p class="feedback" data-feedback>{{ feedback }}</p>
+    <p class="sr-only" data-feedback>{{ feedback }}</p>
     {% endif %}
     <p class="request-error" role="alert" tabindex="-1" hidden></p>
     <details id="roster-{{ slot.id }}" class="roster">

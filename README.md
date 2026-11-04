@@ -34,7 +34,7 @@ DATABASE_URL=sqlite::memory: cargo run
 - New schedule times use `Europe/Berlin`, including daylight-saving changes. Dates show local times without a time-zone label.
 - Existing slots retain their stored instant and bookings after migration. Review legacy slot times separately; they are not silently moved. Generation does not create a duplicate for the same venue and local date.
 - Returning to the page refreshes slot state and the selected identity. **Refresh slots** updates them manually.
-- Booking and refresh controls stay disabled during shared requests, including page updates. A visible status explains the wait. Failed requests restore the controls and show an error.
+- Booking and refresh controls stay disabled during shared requests, including page updates. Disabled buttons turn gray. A CSS refresh icon rotates only while the overview updates, without changing the button size. Reduced-motion mode keeps the icon still. Screen readers receive status updates. Errors remain visible.
 - Set `COOKIE_SECURE=true` in an HTTPS deployment so the browser sends the identity cookie only over HTTPS. Leave it unset for local HTTP previews.
 
 ### Checks

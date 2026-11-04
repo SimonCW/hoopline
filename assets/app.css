@@ -36,6 +36,10 @@ a { color: var(--accent); }
 .member-greeting { min-width: 0; color: var(--muted); font-size: .9rem; }
 .member-greeting .identity-name { padding: .2rem .5rem; border-radius: .4rem; background: #dceee4; color: #104e36; font-size: 1rem; font-weight: 750; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .identity-summary > .btn { max-width: 6rem; padding: .5rem .65rem; font-size: .8rem; }
+#refresh-slots { gap: .4rem; }
+.refresh-icon { width: 1rem; height: 1rem; flex-shrink: 0; }
+body:has(#slots-content[aria-busy="true"], #slots-content.htmx-settling) .refresh-icon { color: var(--accent); animation: refresh-spin .85s linear infinite; }
+@keyframes refresh-spin { to { transform: rotate(360deg); } }
 .name-search { position: relative; }
 .member-matches { list-style: none; margin: .4rem 0 0; padding: .25rem; max-height: 15rem; overflow-y: auto; border: 1px solid #80928b; border-radius: .6rem; background: white; }
 .member-matches [role="option"] { padding: .65rem .75rem; min-height: 44px; border-radius: .4rem; cursor: pointer; overflow-wrap: anywhere; }
@@ -52,7 +56,7 @@ input { width: 100%; min-width: 0; min-height: 48px; border-radius: .6rem; borde
 .btn-primary { background: var(--accent); border-color: var(--accent); color: white; }
 .btn-primary:hover { background: #0b493a; }
 .btn-secondary { background: #f7faf8; }
-.btn:disabled { opacity: .65; cursor: wait; }
+.btn:disabled { cursor: default; background: #dce3de; border-color: #a3b2a8; color: #4a5d53; }
 .btn-small { min-height: 44px; padding: .5rem .65rem; font-size: .85rem; }
 .booking-help { color: var(--muted); margin-bottom: 1.5rem; font-size: .9rem; }
 .week-heading { margin: 1.5rem 0 .75rem; color: #3b5147; }
@@ -81,16 +85,15 @@ input { width: 100%; min-width: 0; min-height: 48px; border-radius: .6rem; borde
 .muted { color: var(--muted); font-size: .85rem; }
 .roster .muted { margin-top: .5rem; }
 .admin-tools { border-top: 1px solid #e1e8e3; }
-.feedback, .request-error { padding: .75rem; margin-top: .75rem; border-radius: .5rem; overflow-wrap: anywhere; }
-.feedback { background: #e5f2eb; color: #104e36; }
+.request-error { padding: .75rem; margin-top: .75rem; border-radius: .5rem; overflow-wrap: anywhere; }
 .request-error { background: #fff0ef; border: 1px solid #b43d34; color: #7b211b; }
-.request-status { padding: .65rem .8rem; margin-bottom: .75rem; background: #e5f2eb; color: #104e36; border-radius: .5rem; font-size: .85rem; }
-.htmx-indicator { display: none; color: var(--muted); font-size: .85rem; }
-.slot-card[aria-busy="true"] .htmx-indicator, #name-step[aria-busy="true"] > .htmx-indicator { display: inline; opacity: 1; }
 .empty-state { display: grid; gap: .75rem; }
 footer { color: var(--muted); text-align: center; font-size: .8rem; padding: 2rem 0 .5rem; }
 .sr-only, .skip-link:not(:focus) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .skip-link:focus { display: block; padding: 1rem; background: white; }
+@media (prefers-reduced-motion: reduce) {
+    body:has(#slots-content[aria-busy="true"], #slots-content.htmx-settling) .refresh-icon { animation: none; }
+}
 @media (min-width: 40rem) {
     .app-shell { padding: 1.5rem; }
     .card { padding: 1.25rem; }

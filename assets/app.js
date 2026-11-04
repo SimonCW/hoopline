@@ -61,18 +61,17 @@
     body.addEventListener("htmx:beforeRequest", (event) => {
         pending = true;
         disableBookingControls();
-        if (document.getElementById("slots-content")) {
-            const status = document.getElementById("booking-request-status");
-            status.textContent = event.detail.requestConfig.verb === "get"
-                ? "Updating slots. Booking controls are temporarily unavailable."
+        const status = document.getElementById("booking-request-status");
+        status.textContent = document.getElementById("name-step") ? "Opening your games."
+            : event.detail.requestConfig.verb === "get" ? "Updating slots. Booking controls are temporarily unavailable."
                 : "Saving changes. Booking controls are temporarily unavailable.";
-            status.hidden = false;
-        }
+        status.hidden = false;
         const scope = event.detail.elt.closest(".slot-card, #name-step, #user-selector") || event.detail.elt;
         scope.setAttribute("aria-busy", "true");
         scope.querySelectorAll(".request-error").forEach(error => { error.hidden = true; });
         scope.querySelectorAll("[data-feedback]").forEach(message => { message.hidden = true; });
         document.getElementById("global-error-banner").hidden = true;
+        openRosters.clear();
         document.querySelectorAll(".roster[open]").forEach(roster => openRosters.add(roster.id));
     });
     body.addEventListener("htmx:afterRequest", (event) => {
@@ -87,6 +86,12 @@
         // Replaced cards and out-of-band headers contain fresh, enabled buttons.
         // Keep them locked until the successful request has fully settled.
         if (pending) disableBookingControls();
+        // Restore expanded content before the browser paints the new HTML.
+        // Waiting for afterSettle would briefly collapse every open roster.
+        openRosters.forEach(id => {
+            const roster = document.getElementById(id);
+            if (roster) roster.open = true;
+        });
     });
     body.addEventListener("htmx:responseError", (event) => {
         const doc = new DOMParser().parseFromString(event.detail.xhr.responseText, "text/html");
@@ -98,10 +103,6 @@
     body.addEventListener("htmx:afterSettle", (event) => {
         // Out-of-band identity updates also emit this event for the same request.
         if (event.detail.elt.id !== event.detail.target.id) return;
-        openRosters.forEach(id => {
-            const roster = document.getElementById(id);
-            if (roster) roster.open = true;
-        });
         finishRequest();
         // outerHTML swaps replace the original target node.
         const target = document.getElementById(event.detail.target.id) || event.detail.target;

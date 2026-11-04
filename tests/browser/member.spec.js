@@ -13,6 +13,18 @@ async function createMember(page) {
   return name;
 }
 
+async function overviewLayout(page) {
+  return page.evaluate(() => {
+    const card = document.querySelector('[data-testid="slot-card"]');
+    return {
+      header: document.getElementById('user-selector').getBoundingClientRect().toJSON(),
+      card: card.getBoundingClientRect().toJSON(),
+      action: card.querySelector('.slot-actions button').getBoundingClientRect().toJSON(),
+      pageHeight: document.documentElement.scrollHeight,
+    };
+  });
+}
+
 test('compact cards, remembered identity, signup and safe cancellation', async ({ page }) => {
   await createMember(page);
   await expect(page.getByRole('combobox')).toHaveCount(0);
@@ -120,7 +132,8 @@ test('slow request disables repeat submits and keeps roster open', async ({ page
   await card.getByRole('button', { name: 'Sign Up', exact: true }).click();
   await expect(card.getByRole('button', { name: 'Sign Up', exact: true })).toBeDisabled();
   await expect(card).toHaveAttribute('aria-busy', 'true');
-  await expect(card.locator('.htmx-indicator')).toBeVisible();
+  await expect(page.locator('#booking-request-status')).toHaveClass('sr-only');
+  await expect(page.locator('#booking-request-status')).toContainText('Saving changes');
   // A second synthetic submit must also be dropped, not queued.
   await card.locator('form').first().evaluate(form => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
   expect(requests).toBe(1);
@@ -242,7 +255,8 @@ test('failed cancellation keeps the booking and hides old success feedback', asy
   await createMember(page);
   const card = page.getByTestId('slot-card').first();
   await card.getByRole('button', { name: 'Sign Up', exact: true }).click();
-  await expect(card.locator('[data-feedback]')).toBeVisible();
+  await expect(card.locator('[data-feedback]')).toHaveClass('sr-only');
+  await expect(card.locator('[data-feedback]')).toContainText('Booking saved');
   await page.route('**/slots/*/cancel', route => route.fulfill({
     status: 503, contentType: 'text/html', body: '<main><p>System busy. Refresh and try again.</p></main>',
   }));
@@ -421,11 +435,107 @@ test('a failed refresh restores booking controls and shows a visible error', asy
   await capture;
   const button = page.getByTestId('slot-card').first().getByRole('button', { name: 'Sign Up', exact: true });
   await expect(button).toBeDisabled();
-  await expect(page.locator('#booking-request-status')).toBeVisible();
+  await expect(page.locator('#booking-request-status')).toHaveClass('sr-only');
+  await expect(page.locator('#booking-request-status')).toContainText('Updating slots');
   release();
   await expect(page.locator('#global-error-banner')).toContainText('Refresh failed');
   await expect(button).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Refresh slots' })).toBeEnabled();
   await expect(page.locator('#booking-request-status')).toBeHidden();
   await expect(page.getByTestId('slot-card').first().getByTestId('booking-status')).toHaveText('Not booked');
+});
+
+test('background refresh keeps layout and expanded rosters stable through the first frame', async ({ page }) => {
+  await createMember(page);
+  const card = page.getByTestId('slot-card').first();
+  await card.locator('.roster > summary').click();
+  const before = await overviewLayout(page);
+  let release;
+  let captured;
+  const gate = new Promise(resolve => { release = resolve; });
+  const capture = new Promise(resolve => { captured = resolve; });
+  await page.route('**/slots/fragment', async route => {
+    const response = await route.fetch();
+    captured();
+    await gate;
+    await route.fulfill({ response });
+  });
+  await page.evaluate(() => {
+    htmx.config.defaultSettleDelay = 400;
+    document.body.addEventListener('htmx:afterSwap', event => {
+      if (event.detail.elt.id !== 'slots-content') return;
+      requestAnimationFrame(() => {
+        const card = document.querySelector('[data-testid="slot-card"]');
+        window.refreshFrame = { open: card.querySelector('.roster').open, height: card.getBoundingClientRect().height };
+      });
+    });
+    window.dispatchEvent(new Event('focus'));
+  });
+  await capture;
+  await expect(card.locator('.slot-actions button')).toBeDisabled();
+  expect(await overviewLayout(page)).toEqual(before);
+  release();
+  await expect.poll(() => page.evaluate(() => window.refreshFrame)).toEqual({ open: true, height: before.card.height });
+  await expect(card.locator('.slot-actions button')).toBeEnabled();
+  expect(await overviewLayout(page)).toEqual(before);
+});
+
+test('booking feedback does not resize the card or button', async ({ page }) => {
+  await createMember(page);
+  const card = page.getByTestId('slot-card').first();
+  const before = await overviewLayout(page);
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route('**/slots/*/signup', async route => { await gate; await route.continue(); });
+  await card.getByRole('button', { name: 'Sign Up', exact: true }).click();
+  await expect(card.locator('.slot-actions button')).toBeDisabled();
+  await expect(page.locator('.refresh-icon')).toHaveCSS('animation-name', 'none');
+  expect(await overviewLayout(page)).toEqual(before);
+  release();
+  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+  await expect(card.locator('.slot-actions button')).toBeEnabled();
+  expect(await overviewLayout(page)).toEqual(before);
+  await expect(page.locator('#announcements')).toContainText('Booking saved');
+  page.once('dialog', dialog => dialog.accept());
+  await card.getByRole('button', { name: 'Cancel booking' }).click();
+  await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect(await card.locator('.slot-actions button').evaluate(button => getComputedStyle(button).transitionDuration)).toBe('0s');
+});
+
+test('refresh has a CSS activity icon and clear disabled colors without layout shifts', async ({ page }) => {
+  await createMember(page);
+  const refresh = page.getByRole('button', { name: 'Refresh slots' });
+  const icon = refresh.locator('.refresh-icon');
+  const signup = page.getByTestId('slot-card').first().getByRole('button', { name: 'Sign Up', exact: true });
+  const before = await refresh.boundingBox();
+  await expect(icon).toBeVisible();
+  await expect(icon).toHaveCSS('animation-name', 'none');
+  const activeColor = await signup.evaluate(button => getComputedStyle(button).backgroundColor);
+  let release;
+  let captured;
+  const gate = new Promise(resolve => { release = resolve; });
+  const capture = new Promise(resolve => { captured = resolve; });
+  await page.route('**/slots/fragment', async route => {
+    const response = await route.fetch();
+    captured();
+    await gate;
+    await route.fulfill({ response });
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await capture;
+  await expect(refresh).toBeDisabled();
+  await expect(icon).toHaveCSS('animation-name', 'refresh-spin');
+  await expect(signup).toHaveCSS('background-color', 'rgb(220, 227, 222)');
+  await expect(signup).toHaveCSS('color', 'rgb(74, 93, 83)');
+  expect(await refresh.boundingBox()).toEqual(before);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(icon).toHaveCSS('animation-name', 'none');
+  expect(await refresh.boundingBox()).toEqual(before);
+  release();
+  await expect(refresh).toBeEnabled();
+  await expect(signup).toHaveCSS('background-color', activeColor);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect(icon).toHaveCSS('animation-name', 'none');
+  expect(await refresh.boundingBox()).toEqual(before);
 });
