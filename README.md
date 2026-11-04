@@ -18,8 +18,11 @@ Use a current stable Rust toolchain that supports edition 2024. The member UX ch
 For a disposable preview with sample data:
 
 ```sh
-DATABASE_URL=sqlite::memory: PREVIEW_SAMPLE=1 cargo run
+just preview
 ```
+
+This stops this checkout's dev server on port 5050 before starting the preview.
+Run `just stop-dev` to stop that server without starting a new one.
 
 ### Member booking behavior
 
