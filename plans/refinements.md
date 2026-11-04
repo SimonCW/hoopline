@@ -2,6 +2,7 @@
 
 ## Current Status and Next Tasks (2026-11-04)
 
+- The `finish-admin-experience` branch implements admin roster controls, single-game editing, recurring defaults, and the Sunday release. Validate and review this branch before deployment; the no-auth and production safety tasks remain open.
 - [PR #1](https://github.com/SimonCW/hoopline/pull/1) merged signup, cancellation, waitlist routing, and automatic promotion.
 - [PR #2](https://github.com/SimonCW/hoopline/pull/2) merged the mobile member flow, rolling schedule, accessibility and browser tests, and stale-identity protection.
 - The PR checks are historical results. A merge does not verify production deployment, backup recovery, or real-device usability.

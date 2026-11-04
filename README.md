@@ -30,13 +30,20 @@ DATABASE_URL=sqlite::memory: cargo run
 - Use **Log out** at the top right if you selected the wrong name or use a shared device. This clears the cookie, not your bookings. Name selection is not authentication.
 - Expand **Who's playing?** to see the player list and ordered waitlist.
 - A cancellation automatically promotes the first waitlist member. No notification is sent.
-- Slots renew every minute within a rolling 14-day local-date window. This is not a Sunday-only release.
+- New games open every Sunday at 19:00 Berlin time for the week starting eight days later. For example, Sunday 8 November opens 16–22 November. Renewal runs every minute. Admins can change the shared Sunday release time.
 - New schedule times use `Europe/Berlin`, including daylight-saving changes. Dates show local times without a time-zone label.
 - Existing slots retain their stored instant and bookings after migration. Review legacy slot times separately; they are not silently moved. Generation does not create a duplicate for the same venue and local date.
 - Returning to the page refreshes slot state and the selected identity. **Refresh slots** updates them manually.
 - Booking actions are tied to the member shown on the page. If another tab changes the selected user, stale actions return an error without changing bookings. Refresh before trying again.
 - Booking and refresh controls stay disabled during shared requests, including page updates. Disabled buttons turn gray. A CSS refresh icon rotates only while the overview updates, without changing the button size. Reduced-motion mode keeps the icon still. Screen readers receive status updates. Errors remain visible.
 - Set `COOKIE_SECURE=true` in an HTTPS deployment so the browser sends the identity cookie only over HTTPS. Leave it unset for local HTTP previews.
+
+### Admin mode
+
+- Admin identities can switch between member view and admin mode. Name selection is not authentication; anyone who can select an admin name can use these controls.
+- Admins can add or remove members and reorder the waitlist. Removing a player promotes the first waiting member. Adding a player ahead of the waitlist is an explicit override.
+- **Edit this game** changes one occurrence. When bookings exist, the admin must choose whether to keep or clear them. Clearing removes players and waitlist members without notifications.
+- **Edit recurring schedule** changes defaults for newly generated games only. Existing games and bookings stay unchanged. Pausing a schedule does not remove published games. Previously opened games remain available when the release time changes.
 
 ### Checks
 

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="admin-editor" aria-labelledby="schedule-title">
+    <h1 id="schedule-title">Recurring schedule</h1>
+    <p>Changes apply only to newly created games. Existing games and bookings stay unchanged. Pausing stops new games only. A different weekday can create another game in the current window.</p>
+    <p class="request-error" role="alert" tabindex="-1" hidden></p>
+    {% for schedule in schedules %}
+    <form class="card identity-form" hx-post="/admin/schedule/{{ schedule.id }}" hx-swap="none" hx-sync="body:drop" hx-headers='{"X-Hoopline-User":"{{ user_id }}"}'>
+        <h2>{{ schedule.venue }}</h2>
+        <input type="hidden" name="revision" value="{{ schedule.revision }}">
+        <label for="day-{{ schedule.id }}">Weekday</label><select id="day-{{ schedule.id }}" name="weekday">
+            <option value="1" {% if schedule.weekday == 1 %}selected{% endif %}>Monday</option><option value="2" {% if schedule.weekday == 2 %}selected{% endif %}>Tuesday</option><option value="3" {% if schedule.weekday == 3 %}selected{% endif %}>Wednesday</option><option value="4" {% if schedule.weekday == 4 %}selected{% endif %}>Thursday</option><option value="5" {% if schedule.weekday == 5 %}selected{% endif %}>Friday</option><option value="6" {% if schedule.weekday == 6 %}selected{% endif %}>Saturday</option><option value="7" {% if schedule.weekday == 7 %}selected{% endif %}>Sunday</option>
+        </select>
+        <label for="time-{{ schedule.id }}">Berlin time</label><input id="time-{{ schedule.id }}" type="time" name="time_local" value="{{ schedule.time_local }}" required>
+        <label for="venue-{{ schedule.id }}">Location</label><input id="venue-{{ schedule.id }}" name="venue" maxlength="120" value="{{ schedule.venue }}" required>
+        <label for="players-{{ schedule.id }}">Player capacity</label><input id="players-{{ schedule.id }}" type="number" name="max_players" min="1" max="100" value="{{ schedule.max_players }}" required>
+        <label for="waiting-{{ schedule.id }}">Waitlist capacity</label><input id="waiting-{{ schedule.id }}" type="number" name="max_waitlist" min="0" max="100" value="{{ schedule.max_waitlist }}" required>
+        <label><input type="checkbox" name="is_active" {% if schedule.is_active %}checked{% endif %}> Active</label>
+        <button class="btn btn-primary" type="submit">Save {{ schedule.venue }}</button>
+    </form>
+    {% endfor %}
+    <details><summary>Add a recurring game</summary>
+    <form class="card identity-form" hx-post="/admin/schedule" hx-swap="none" hx-sync="body:drop" hx-headers='{"X-Hoopline-User":"{{ user_id }}"}'>
+        <label for="new-day">Weekday</label><select id="new-day" name="weekday"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="7">Sunday</option></select>
+        <label for="new-time">Berlin time</label><input id="new-time" type="time" name="time_local" required>
+        <label for="new-venue">Location</label><input id="new-venue" name="venue" maxlength="120" required>
+        <label for="new-players">Player capacity</label><input id="new-players" type="number" name="max_players" min="1" max="100" value="15" required>
+        <label for="new-waiting">Waitlist capacity</label><input id="new-waiting" type="number" name="max_waitlist" min="0" max="100" value="5" required>
+        <label><input type="checkbox" name="is_active" checked> Active</label>
+        <button class="btn btn-primary" type="submit">Add recurring game</button>
+    </form></details>
+    <form class="card identity-form" hx-post="/admin/release-time" hx-swap="none" hx-sync="body:drop" hx-headers='{"X-Hoopline-User":"{{ user_id }}"}'>
+        <h2>Sunday release</h2><p>{{ next_release }}</p>
+        <p>Games open on Sunday for the week starting eight days later. Already open games remain available.</p>
+        <input type="hidden" name="revision" value="{{ release_revision }}">
+        <label for="release-time">Sunday release time in Berlin</label><input id="release-time" type="time" name="sunday_release_time" min="04:00" value="{{ release }}" required>
+        <button class="btn btn-primary" type="submit">Save release time</button>
+    </form>
+    <a href="/slots?mode=admin">Back to admin games</a> · <a href="/admin/schedule">Reload latest values</a>
+</section>
+{% endblock %}

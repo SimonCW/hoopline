@@ -198,6 +198,370 @@ async fn stale_admin_remove_and_promote_leave_bookings_unchanged() {
 }
 
 #[tokio::test]
+async fn admin_roster_actions_work_after_a_game_starts() {
+    let pool = test_pool().await;
+    sqlx::query("UPDATE slots SET datetime = '2000-01-01T20:00:00Z' WHERE id = 1")
+        .execute(&pool).await.unwrap();
+    let app = app_with_pool(pool.clone());
+    for (uri, body) in [
+        ("/admin/slots/1/add", "user_id=7&revision=0&list=waitlist"),
+        ("/admin/slots/1/add", "user_id=8&revision=1&list=waitlist"),
+        ("/admin/slots/1/move/8", "revision=2&direction=up"),
+        ("/admin/slots/1/promote/8", "revision=3"),
+        ("/admin/slots/1/remove/2", "revision=4"),
+    ] {
+        let response = app.clone().oneshot(Request::builder().method("POST").uri(uri)
+            .header(header::COOKIE, "user_id=1").header("x-hoopline-user", "1")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(body)).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{uri}");
+    }
+    let slot = db::find_slot(&pool, 1).await.unwrap().unwrap();
+    assert!(!slot.player_user_ids.contains(&2));
+    assert!(slot.player_user_ids.contains(&8));
+    assert!(slot.player_user_ids.contains(&7));
+    assert_eq!(slot.revision, 5);
+}
+
+#[tokio::test]
+async fn admin_game_edit_requires_booking_choice_and_rejects_stale_forms() {
+    let pool = test_pool().await;
+    let app = app_with_pool(pool.clone());
+    let post = |body: &'static str| {
+        Request::builder()
+            .method("POST")
+            .uri("/admin/slots/1/edit")
+            .header(header::COOKIE, "user_id=1")
+            .header("x-hoopline-user", "1")
+            .header("hx-request", "true")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .unwrap()
+    };
+    let response = app
+        .clone()
+        .oneshot(post("date=2099-02-01&time=20%3A00&venue=New&revision=0"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let response = app
+        .clone()
+        .oneshot(post(
+            "date=2099-02-01&time=20%3A00&venue=New&revision=0&bookings=keep",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let slot = db::find_slot(&pool, 1).await.unwrap().unwrap();
+    assert_eq!(slot.venue, "New");
+    assert_eq!(slot.players.len(), 6);
+    assert!(slot.is_override);
+    let response = app
+        .oneshot(post(
+            "date=2099-02-02&time=20%3A00&venue=Other&revision=0&bookings=clear",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        db::find_slot(&pool, 1)
+            .await
+            .unwrap()
+            .unwrap()
+            .players
+            .len(),
+        6
+    );
+}
+
+#[tokio::test]
+async fn game_edit_clear_and_noop_are_safe() {
+    let pool = test_pool().await;
+    let app = app_with_pool(pool.clone());
+    let post = |body: &'static str| {
+        Request::builder()
+            .method("POST")
+            .uri("/admin/slots/1/edit")
+            .header(header::COOKIE, "user_id=1")
+            .header("x-hoopline-user", "1")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .unwrap()
+    };
+    let slot = db::find_slot(&pool, 1).await.unwrap().unwrap();
+    let noop = format!(
+        "date={}&time=20%3A00&venue=Luisenschule&revision=0&bookings=clear",
+        slot.edit_date()
+    );
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/slots/1/edit")
+                .header(header::COOKIE, "user_id=1")
+                .header("x-hoopline-user", "1")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(noop))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        db::find_slot(&pool, 1)
+            .await
+            .unwrap()
+            .unwrap()
+            .players
+            .len(),
+        6
+    );
+    let response = app
+        .oneshot(post(
+            "date=2099-02-01&time=20%3A00&venue=New&revision=0&bookings=clear",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        db::find_slot(&pool, 1)
+            .await
+            .unwrap()
+            .unwrap()
+            .players
+            .len(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn schedule_changes_require_admin_and_preserve_existing_games() {
+    let pool = test_pool().await;
+    let app = app_with_pool(pool.clone());
+    let request = |cookie: &'static str, header_id: &'static str, body: &'static str| {
+        Request::builder()
+            .method("POST")
+            .uri("/admin/schedule/1")
+            .header(header::COOKIE, cookie)
+            .header("x-hoopline-user", header_id)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .unwrap()
+    };
+    let fields = "weekday=2&time_local=21%3A00&venue=Other&max_players=12&max_waitlist=4&is_active=on&revision=0";
+    assert_eq!(
+        app.clone()
+            .oneshot(request("user_id=2", "2", fields))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request("user_id=1", "2", fields))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request("user_id=1", "1", fields))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        app.oneshot(request("user_id=1", "1", fields))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let game = db::find_slot(&pool, 1).await.unwrap().unwrap();
+    assert_eq!(game.venue, "Luisenschule");
+    assert_eq!(game.players.len(), 6);
+}
+
+#[tokio::test]
+async fn generation_opens_the_example_week_at_sunday_release() {
+    use chrono::TimeZone;
+    let pool = test_pool().await;
+    let before = chrono::Utc
+        .with_ymd_and_hms(2026, 11, 8, 17, 59, 59)
+        .unwrap();
+    db::create_upcoming_slots(&pool, before).await.unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM slots WHERE occurrence_date >= '2026-11-16' AND occurrence_date <= '2026-11-22'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(count, 0);
+    db::create_upcoming_slots(&pool, before + chrono::Duration::seconds(1))
+        .await
+        .unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM slots WHERE occurrence_date >= '2026-11-16' AND occurrence_date <= '2026-11-22'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(count, 3);
+}
+
+#[tokio::test]
+async fn moved_generated_game_is_not_recreated_by_renewal() {
+    let pool = test_pool().await;
+    let now = chrono::Utc::now();
+    db::create_upcoming_slots(&pool, now).await.unwrap();
+    let id: i64 = sqlx::query_scalar(
+        "SELECT id FROM slots WHERE schedule_id IS NOT NULL ORDER BY datetime LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let slot = db::find_slot(&pool, id).await.unwrap().unwrap();
+    let body = format!(
+        "date={}&time={}&venue=Moved+court&revision={}",
+        slot.edit_date(),
+        slot.edit_time().replace(':', "%3A"),
+        slot.revision
+    );
+    let response = app_with_pool(pool.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/admin/slots/{id}/edit"))
+                .header(header::COOKIE, "user_id=1")
+                .header("x-hoopline-user", "1")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(db::create_upcoming_slots(&pool, now).await.unwrap(), 0);
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM slots WHERE schedule_id = (SELECT schedule_id FROM slots WHERE id = ?) AND occurrence_date = (SELECT occurrence_date FROM slots WHERE id = ?)")
+        .bind(id).bind(id).fetch_one(&pool).await.unwrap();
+    assert_eq!(count, 1);
+}
+
+#[tokio::test]
+async fn conflicting_game_edit_keeps_all_bookings_and_original_location() {
+    let pool = test_pool().await;
+    let other = db::find_slot(&pool, 2).await.unwrap().unwrap();
+    let body = format!(
+        "date={}&time={}&venue={}&revision=0&bookings=clear",
+        other.edit_date(),
+        other.edit_time().replace(':', "%3A"),
+        other.venue
+    );
+    let response = app_with_pool(pool.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/slots/1/edit")
+                .header(header::COOKIE, "user_id=1")
+                .header("x-hoopline-user", "1")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(
+        response_body_string(response)
+            .await
+            .contains("already exists")
+    );
+    let slot = db::find_slot(&pool, 1).await.unwrap().unwrap();
+    assert_eq!(slot.venue, "Luisenschule");
+    assert_eq!(slot.players.len(), 6);
+    assert_eq!(slot.revision, 0);
+}
+
+#[tokio::test]
+async fn release_time_rejects_stale_and_ambiguous_settings() {
+    let pool = test_pool().await;
+    let app = app_with_pool(pool);
+    let request = |body: &'static str| {
+        Request::builder()
+            .method("POST")
+            .uri("/admin/release-time")
+            .header(header::COOKIE, "user_id=1")
+            .header("x-hoopline-user", "1")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .unwrap()
+    };
+    assert_eq!(
+        app.clone()
+            .oneshot(request("sunday_release_time=02%3A30&revision=0"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request("sunday_release_time=20%3A00&revision=0"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        app.oneshot(request("sunday_release_time=21%3A00&revision=0"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+}
+
+#[tokio::test]
+async fn manual_generation_reports_conflicting_linked_game() {
+    let pool = test_pool().await;
+    db::create_upcoming_slots(&pool, chrono::Utc::now())
+        .await
+        .unwrap();
+    let row = sqlx::query("SELECT id, datetime, venue, schedule_id FROM slots WHERE schedule_id IS NOT NULL ORDER BY datetime LIMIT 1")
+        .fetch_one(&pool).await.unwrap();
+    let id: i64 = row.get("id");
+    let datetime: String = row.get("datetime");
+    let venue: String = row.get("venue");
+    let schedule: i64 = row.get("schedule_id");
+    let other: i64 = sqlx::query_scalar("SELECT id FROM slot_schedules WHERE id != ? LIMIT 1")
+        .bind(schedule)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM slots WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO slots (datetime, venue, schedule_id, occurrence_date) VALUES (?, ?, ?, '2090-01-01')")
+        .bind(datetime).bind(venue).bind(other).execute(&pool).await.unwrap();
+    let response = app_with_pool(pool)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/slots/generate")
+                .header(header::COOKIE, "user_id=1")
+                .header("x-hoopline-user", "1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response_body_string(response)
+            .await
+            .contains("another game uses this time and location")
+    );
+}
+
+#[tokio::test]
 async fn get_root_returns_ok_and_body() {
     let pool = test_pool().await;
     let app = app_with_pool(pool);

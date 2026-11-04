@@ -1,6 +1,6 @@
 # Admin Experience: Implementation Plan
 
-Status: simplified after user review, 2026-11-04. This file is the implementation checklist for R1 in `refinements.md`.
+Status: implementation in progress on `finish-admin-experience`, 2026-11-04. Admin rosters, single-game editing, recurring defaults, and Sunday release have been implemented. Verify and review before deployment. Unchecked items below are not claims of completed test coverage.
 
 ## 1. Outcome and Scope
 

@@ -5,6 +5,7 @@
         <div>
             <h3 id="slot-title-{{ slot.id }}" tabindex="-1">{{ slot.datetime_label_de() }}</h3>
             <p class="venue">{{ slot.venue }}</p>
+            {% if slot.is_override %}<p class="muted">Changed game</p>{% endif %}
         </div>
         <p class="booking-status {% if slot.user_is_signed_up(current_user_id) %}is-booked{% endif %}" data-testid="booking-status">{{ slot.booking_status(current_user_id) }}</p>
     </div>
@@ -14,7 +15,7 @@
     </div>
     <div class="slot-actions">
         {% if admin_mode %}
-        <p class="muted">Use the roster controls to manage this game.</p>
+        <a class="btn btn-secondary" href="/admin/slots/{{ slot.id }}/edit">Edit this game</a>
         {% elif slot.has_started() %}
         <p>This slot has started. Refresh to see upcoming slots.</p>
         {% elif current_user_id.is_none() %}
