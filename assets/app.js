@@ -8,7 +8,7 @@
     const openRosters = new Set();
 
     function disableBookingControls() {
-        document.querySelectorAll('#slots-content button, #user-selector form[hx-post] button, #refresh-slots').forEach(button => {
+        document.querySelectorAll('#slots-content button, #user-selector form[hx-post] button, #refresh-slots, .admin-editor button').forEach(button => {
             // Only restore controls disabled by this request, not disabled slot states.
             if (!button.disabled) {
                 button.dataset.requestDisabled = "";
@@ -33,7 +33,7 @@
     }
 
     function showError(element, message) {
-        const scope = element?.closest?.(".slot-card, #name-step, #user-selector");
+        const scope = element?.closest?.(".slot-card, #name-step, #user-selector, .admin-editor");
         const error = scope?.querySelector(".request-error") || document.getElementById("global-error-banner");
         error.textContent = message;
         error.hidden = false;
@@ -59,6 +59,11 @@
         }
     });
     body.addEventListener("htmx:beforeRequest", (event) => {
+        if (event.detail.elt.closest('.admin-editor')?.querySelector('[name="bookings"]:checked')?.value === 'clear' &&
+            !window.confirm('Clear all player and waitlist bookings? No notifications will be sent.')) {
+            event.preventDefault();
+            return;
+        }
         pending = true;
         disableBookingControls();
         const status = document.getElementById("booking-request-status");
@@ -66,7 +71,7 @@
             : event.detail.requestConfig.verb === "get" ? "Updating slots. Booking controls are temporarily unavailable."
                 : "Saving changes. Booking controls are temporarily unavailable.";
         status.hidden = false;
-        const scope = event.detail.elt.closest(".slot-card, #name-step, #user-selector") || event.detail.elt;
+        const scope = event.detail.elt.closest(".slot-card, #name-step, #user-selector, .admin-editor") || event.detail.elt;
         scope.setAttribute("aria-busy", "true");
         scope.querySelectorAll(".request-error").forEach(error => { error.hidden = true; });
         scope.querySelectorAll("[data-feedback]").forEach(message => { message.hidden = true; });

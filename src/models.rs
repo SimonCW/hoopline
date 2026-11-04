@@ -5,6 +5,7 @@ use chrono_tz::{Europe::Berlin, Tz};
 pub struct Slot {
     pub id: i64,
     pub revision: i64,
+    pub is_override: bool,
     pub datetime: String,
     pub venue: String,
     pub max_players: usize,
@@ -41,6 +42,15 @@ pub fn group_slots(slots: Vec<Slot>) -> Vec<SlotWeek> {
 }
 
 impl Slot {
+    pub fn edit_date(&self) -> String {
+        self.parsed_datetime()
+            .map_or_else(String::new, |value| value.format("%Y-%m-%d").to_string())
+    }
+
+    pub fn edit_time(&self) -> String {
+        self.parsed_datetime()
+            .map_or_else(String::new, |value| value.format("%H:%M").to_string())
+    }
     pub fn has_user(&self, user_id: &i64) -> bool {
         self.player_user_ids.contains(user_id) || self.waitlist_user_ids.contains(user_id)
     }
@@ -189,6 +199,7 @@ mod tests {
         Slot {
             id: 1,
             revision: 0,
+            is_override: false,
             datetime: datetime.into(),
             venue: "Court".into(),
             max_players: 1,

@@ -1,3 +1,4 @@
+mod admin_schedule;
 pub mod db;
 pub mod error;
 mod identity;
@@ -22,7 +23,8 @@ use axum::{
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
-use chrono::Utc;
+use chrono::{NaiveDateTime, TimeZone, Utc};
+use chrono_tz::Europe::Berlin;
 use error::AppError;
 use serde::Deserialize;
 use sqlx::SqlitePool;
@@ -38,6 +40,7 @@ struct SlotsTemplate {
     current_user_id: Option<i64>,
     current_user_is_admin: bool,
     admin_mode: bool,
+    generation_feedback: String,
     users: Vec<UserIdentity>,
     weeks: Vec<SlotWeek>,
 }
@@ -56,6 +59,7 @@ struct SlotsContentTemplate {
     current_user_id: Option<i64>,
     current_user_is_admin: bool,
     admin_mode: bool,
+    generation_feedback: String,
     users: Vec<UserIdentity>,
     weeks: Vec<SlotWeek>,
 }
@@ -87,6 +91,23 @@ struct AdminMoveForm {
 #[derive(Deserialize)]
 struct RevisionForm {
     revision: i64,
+}
+
+#[derive(Template)]
+#[template(path = "admin_slot_edit.html")]
+struct GameEditTemplate {
+    title: String,
+    slot: Slot,
+    user_id: i64,
+}
+
+#[derive(Deserialize)]
+struct GameEditForm {
+    date: String,
+    time: String,
+    venue: String,
+    revision: i64,
+    bookings: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -133,6 +154,9 @@ pub async fn app() -> Result<Router, AppError> {
     }
     let pool = db::init_pool(&database_url).await?;
     create_upcoming_slots(&pool, Utc::now()).await?;
+    if database_url == "sqlite::memory:" && std::env::var("PREVIEW_SAMPLE").as_deref() == Ok("1") {
+        db::seed_preview_roster(&pool).await?;
+    }
     let renewal_pool = pool.clone();
     tokio::spawn(async move {
         let mut timer = tokio::time::interval(Duration::from_secs(60));
@@ -159,6 +183,16 @@ pub fn app_with_pool(pool: SqlitePool) -> Router {
         .route("/slots/{slot_id}/signup", post(signup_slot))
         .route("/slots/{slot_id}/cancel", post(cancel_slot))
         .route("/admin/slots/{slot_id}/add", post(admin_add_slot_user))
+        .route(
+            "/admin/slots/{slot_id}/edit",
+            get(admin_edit_game_page).post(admin_edit_game),
+        )
+        .route(
+            "/admin/schedule",
+            get(admin_schedule::page).post(admin_schedule::create),
+        )
+        .route("/admin/schedule/{id}", post(admin_schedule::update))
+        .route("/admin/release-time", post(admin_schedule::release_time))
         .route(
             "/admin/slots/{slot_id}/move/{user_id}",
             post(admin_move_slot_user),
@@ -196,6 +230,78 @@ pub fn app_with_pool(pool: SqlitePool) -> Router {
         .layer(TraceLayer::new_for_http())
 }
 
+async fn admin_edit_game_page(
+    State(pool): State<SqlitePool>,
+    Path(slot_id): Path<i64>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
+    let user = current_user_from_headers(&pool, &headers)
+        .await?
+        .filter(|user| user.is_admin)
+        .ok_or_else(|| AppError::Forbidden("admin access required".into()))?;
+    let slot = find_slot(&pool, slot_id)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("Game does not exist.".into()))?;
+    Ok(Html(
+        GameEditTemplate {
+            title: "Edit game".into(),
+            slot,
+            user_id: user.id,
+        }
+        .render()?,
+    ))
+}
+
+async fn admin_edit_game(
+    State(pool): State<SqlitePool>,
+    Path(slot_id): Path<i64>,
+    current_user: AdminIdentity,
+    headers: HeaderMap,
+    Form(form): Form<GameEditForm>,
+) -> Result<Response, AppError> {
+    let _ = current_user;
+    let local =
+        NaiveDateTime::parse_from_str(&format!("{} {}", form.date, form.time), "%Y-%m-%d %H:%M")
+            .map_err(|_| AppError::BadRequest("Enter a valid date and time.".into()))?;
+    let datetime = Berlin
+        .from_local_datetime(&local)
+        .single()
+        .ok_or_else(|| {
+            AppError::BadRequest(
+                "This Berlin time is missing or ambiguous because of daylight saving.".into(),
+            )
+        })?
+        .with_timezone(&Utc);
+    let venue = form.venue.trim();
+    if venue.is_empty() || venue.chars().count() > 120 {
+        return Err(AppError::BadRequest(
+            "Enter a location with 1 to 120 characters.".into(),
+        ));
+    }
+    let clear_bookings = match form.bookings.as_deref() {
+        None => None,
+        Some("keep") => Some(false),
+        Some("clear") => Some(true),
+        Some(_) => {
+            return Err(AppError::BadRequest(
+                "Choose whether to keep or clear bookings.".into(),
+            ));
+        }
+    };
+    db::edit_game(
+        &pool,
+        &db::GameEdit {
+            slot_id,
+            revision: form.revision,
+            datetime,
+            venue: venue.into(),
+            clear_bookings,
+        },
+    )
+    .await?;
+    Ok(identity_redirect(&headers, "/slots?mode=admin"))
+}
+
 async fn index(
     State(pool): State<SqlitePool>,
     Query(view): Query<ViewQuery>,
@@ -218,6 +324,7 @@ async fn index(
         current_user_id,
         current_user_is_admin,
         admin_mode: view.admin_mode(current_user_is_admin),
+        generation_feedback: String::new(),
         users: if view.admin_mode(current_user_is_admin) {
             list_users(&pool).await?
         } else {
@@ -244,6 +351,7 @@ async fn slots_fragment(
         current_user_id,
         current_user_is_admin,
         admin_mode: view.admin_mode(current_user_is_admin),
+        generation_feedback: String::new(),
         users: if view.admin_mode(current_user_is_admin) {
             list_users(&pool).await?
         } else {
@@ -320,11 +428,6 @@ async fn cancel_slot(
             return Err(AppError::BadRequest("slot does not exist".to_string()));
         }
         CancelOutcome::Stale => return Err(AppError::StaleSlot),
-        CancelOutcome::Started => {
-            return Err(AppError::BadRequest(
-                "This game has already started.".into(),
-            ));
-        }
     }
 
     let slot = find_slot(&pool, slot_id)
@@ -362,11 +465,6 @@ async fn admin_remove_slot_user(
             return Err(AppError::BadRequest("slot does not exist".to_string()));
         }
         CancelOutcome::Stale => return Err(AppError::StaleSlot),
-        CancelOutcome::Started => {
-            return Err(AppError::BadRequest(
-                "This game has already started.".into(),
-            ));
-        }
     }
 
     let slot = find_slot(&pool, slot_id)
@@ -405,11 +503,6 @@ async fn admin_promote_waitlist_user(
             return Err(AppError::BadRequest("slot does not exist".to_string()));
         }
         PromoteOutcome::Stale => return Err(AppError::StaleSlot),
-        PromoteOutcome::Started => {
-            return Err(AppError::BadRequest(
-                "This game has already started.".into(),
-            ));
-        }
     }
 
     let slot = find_slot(&pool, slot_id)
@@ -430,12 +523,17 @@ async fn admin_generate_slots(
     State(pool): State<SqlitePool>,
     current_user: AdminIdentity,
 ) -> Result<Html<String>, AppError> {
-    create_upcoming_slots(&pool, Utc::now()).await?;
+    let report = db::create_upcoming_slots_report(&pool, Utc::now()).await?;
     let template = SlotsContentTemplate {
         identity_refresh_html: String::new(),
         current_user_id: Some(current_user.id()),
         current_user_is_admin: true,
         admin_mode: true,
+        generation_feedback: format!(
+            "Created {} games. {}",
+            report.created,
+            report.warnings.join(" ")
+        ),
         users: list_users(&pool).await?,
         weeks: group_slots(list_slots(&pool).await?),
     };

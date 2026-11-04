@@ -7,6 +7,36 @@ verify:
 test-ui:
   npm run test:ui
 
+# Stop this checkout's dev server on port 5050, but not other applications.
+stop-dev:
+  #!/usr/bin/env bash
+  set -eu
+  pids=$(lsof -nP -tiTCP:5050 -sTCP:LISTEN || true)
+  if [ -z "$pids" ]; then
+    echo "Port 5050 is free."
+    exit 0
+  fi
+  for pid in $pids; do
+    if ! lsof -a -p "$pid" -d txt -Fn | grep -Fxq "n$PWD/target/debug/hoopline"; then
+      echo "Port 5050 is used by another process (PID $pid); not stopping it." >&2
+      exit 1
+    fi
+  done
+  kill $pids
+  for i in {1..50}; do
+    if ! lsof -nP -tiTCP:5050 -sTCP:LISTEN >/dev/null; then
+      echo "Stopped Hoopline on port 5050."
+      exit 0
+    fi
+    sleep 0.1
+  done
+  echo "Port 5050 is still in use." >&2
+  exit 1
+
+# Start a disposable preview with a full game and three people waiting.
+preview: stop-dev
+  DATABASE_URL=sqlite::memory: PREVIEW_SAMPLE=1 PORT=5050 cargo run
+
 healthcheck db_mode="memory":
   db_mode="{{db_mode}}"; \
   if [ "$db_mode" = "file" ]; then \

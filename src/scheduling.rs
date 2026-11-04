@@ -73,7 +73,7 @@ pub fn next_release(
 #[cfg(test)]
 mod tests {
     use super::{latest_open_date, next_release};
-    use chrono::{NaiveDate, NaiveTime, TimeZone, Utc};
+    use chrono::{Days, NaiveDate, NaiveTime, TimeZone, Utc};
 
     #[test]
     fn sunday_release_opens_the_week_starting_eight_days_later() {
@@ -148,6 +148,33 @@ mod tests {
                 latest_open_date(before, time).unwrap(),
                 target - chrono::Days::new(1)
             );
+        }
+    }
+
+    #[test]
+    fn every_sunday_releases_the_following_week() {
+        // Use 2027 dates so the fixtures do not match the shipped example week.
+        let time = NaiveTime::from_hms_opt(19, 0, 0).unwrap();
+        for (sunday, first, last) in [
+            (
+                Utc.with_ymd_and_hms(2027, 8, 1, 17, 0, 0).unwrap(),
+                NaiveDate::from_ymd_opt(2027, 8, 9).unwrap(),
+                NaiveDate::from_ymd_opt(2027, 8, 15).unwrap(),
+            ),
+            (
+                Utc.with_ymd_and_hms(2027, 8, 8, 17, 0, 0).unwrap(),
+                NaiveDate::from_ymd_opt(2027, 8, 16).unwrap(),
+                NaiveDate::from_ymd_opt(2027, 8, 22).unwrap(),
+            ),
+        ] {
+            let before = sunday - chrono::Duration::seconds(1);
+            assert_eq!(
+                latest_open_date(before, time).unwrap(),
+                first - Days::new(1)
+            );
+            assert_eq!(latest_open_date(sunday, time).unwrap(), last);
+            assert_eq!(next_release(before, time).unwrap(), (sunday, first));
+            assert_eq!(next_release(sunday, time).unwrap().1, first + Days::new(7));
         }
     }
 

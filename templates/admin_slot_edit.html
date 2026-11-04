@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card admin-editor" aria-labelledby="edit-title">
+    <h1 id="edit-title">Edit this game</h1>
+    <p>Times use Europe/Berlin. This changes one game only.</p>
+    <p>{{ slot.players.len() }} players · {{ slot.waitlist.len() }} waiting</p>
+    <p class="request-error" role="alert" tabindex="-1" hidden></p>
+    <form class="identity-form" hx-post="/admin/slots/{{ slot.id }}/edit" hx-swap="none" hx-sync="body:drop" hx-headers='{"X-Hoopline-User":"{{ user_id }}"}'>
+        <input type="hidden" name="revision" value="{{ slot.revision }}">
+        <label for="game-date">Date</label><input id="game-date" type="date" name="date" value="{{ slot.edit_date() }}" required>
+        <label for="game-time">Time</label><input id="game-time" type="time" name="time" value="{{ slot.edit_time() }}" required>
+        <label for="game-venue">Location</label><input id="game-venue" name="venue" value="{{ slot.venue }}" maxlength="120" required>
+        {% if !slot.players.is_empty() || !slot.waitlist.is_empty() %}
+        <fieldset><legend>What should happen to the bookings?</legend>
+            <label><input type="radio" name="bookings" value="keep" required> Keep all bookings</label>
+            <label><input type="radio" name="bookings" value="clear" required> Clear all bookings</label>
+            <p>Clearing removes players and waitlist members. No notifications are sent.</p>
+        </fieldset>
+        {% endif %}
+        <button class="btn btn-primary" type="submit">Save game</button>
+    </form>
+    <a href="/slots?mode=admin">Back to admin games</a>
+    <a href="/admin/slots/{{ slot.id }}/edit">Reload latest values</a>
+</section>
+{% endblock %}
