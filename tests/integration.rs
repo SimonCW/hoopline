@@ -13,6 +13,10 @@ async fn response_body_string(response: axum::response::Response) -> String {
 
 async fn test_pool() -> sqlx::SqlitePool {
     let pool = db::init_pool("sqlite::memory:").await.unwrap();
+    // Keep the historical migration data as a deterministic test fixture.
+    let migration = include_str!("../migrations/001_initial.sql");
+    let fixture = &migration[migration.find("INSERT INTO users").unwrap()..];
+    sqlx::raw_sql(fixture).execute(&pool).await.unwrap();
     // Fixed future dates keep booking tests independent of the current weekday.
     sqlx::query("UPDATE slots SET datetime = CASE id WHEN 1 THEN '2099-01-05T19:00:00Z' WHEN 2 THEN '2099-01-06T19:00:00Z' ELSE '2099-01-08T19:00:00Z' END")
         .execute(&pool).await.unwrap();
@@ -1653,11 +1657,7 @@ async fn file_database_serializes_simultaneous_signups_without_overbooking() {
         directory.path().join("bookings.db").display()
     );
     let pool = db::init_pool(&database_url).await.unwrap();
-    sqlx::query("DELETE FROM bookings WHERE slot_id = 1")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("UPDATE slots SET datetime = '2099-01-05T19:00:00Z', max_players = 2, max_waitlist = 3 WHERE id = 1")
+    sqlx::query("INSERT INTO slots (id, datetime, venue, max_players, max_waitlist) VALUES (1, '2099-01-05T19:00:00Z', 'Test court', 2, 3)")
         .execute(&pool).await.unwrap();
     let mut users = Vec::new();
     for number in 0..20 {

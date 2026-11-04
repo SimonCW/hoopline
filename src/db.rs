@@ -275,7 +275,21 @@ pub async fn init_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
     sqlx::query("PRAGMA foreign_keys = ON;")
         .execute(&pool)
         .await?;
+    let new_database: bool = sqlx::query_scalar(
+        "SELECT NOT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations')",
+    )
+    .fetch_one(&pool)
+    .await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
+    if new_database {
+        let mut tx = pool.begin().await?;
+        sqlx::query("DELETE FROM bookings")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM slots").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM users").execute(&mut *tx).await?;
+        tx.commit().await?;
+    }
 
     Ok(pool)
 }
@@ -315,9 +329,30 @@ pub(crate) async fn seed_preview_roster(pool: &SqlitePool) -> Result<(), sqlx::E
         .bind(slot_id)
         .execute(&mut *tx)
         .await?;
-    for index in 1_i64..=18 {
+    let names = [
+        "Amir Hassan",
+        "Ben Fischer",
+        "Chris Weber",
+        "Daniel Müller",
+        "Emil Becker",
+        "Farid Khan",
+        "Gabriel Santos",
+        "Hana Kim",
+        "Isaac Brown",
+        "Jonas Schmidt",
+        "Kai Nguyen",
+        "Leon Wagner",
+        "Maya Johnson",
+        "Nina Bauer",
+        "Omar Ali",
+        "Paul Meyer",
+        "Samira Ahmed",
+        "Theo Martin",
+    ];
+    for (offset, name) in names.iter().enumerate() {
+        let index = i64::try_from(offset).expect("preview roster index fits in i64") + 1;
         let user_id: i64 = sqlx::query_scalar("INSERT INTO users (name) VALUES (?) RETURNING id")
-            .bind(format!("Preview player {index:02}"))
+            .bind(name)
             .fetch_one(&mut *tx)
             .await?;
         sqlx::query(
@@ -1039,6 +1074,19 @@ mod tests {
     use super::{create_upcoming_slots, init_pool, seed_preview_roster};
 
     #[tokio::test]
+    async fn new_database_has_no_players_or_bookings() {
+        let pool = init_pool("sqlite::memory:").await.unwrap();
+        create_upcoming_slots(&pool, Utc::now()).await.unwrap();
+        for table in ["users", "bookings"] {
+            let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(count, 0);
+        }
+    }
+
+    #[tokio::test]
     async fn preview_has_a_full_game_with_three_waiting() {
         let pool = init_pool("sqlite::memory:").await.unwrap();
         create_upcoming_slots(&pool, chrono::Utc::now())
@@ -1165,6 +1213,10 @@ mod tests {
     #[tokio::test]
     async fn renewal_extends_window_and_preserves_legacy_booked_slots() {
         let pool = init_pool("sqlite::memory:").await.unwrap();
+        sqlx::query("INSERT INTO users (id, name) VALUES (1, 'Alex')")
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::query(
             "INSERT INTO slots (datetime, venue) VALUES ('2030-03-25T20:00:00Z', 'Luisenschule')",
         )
