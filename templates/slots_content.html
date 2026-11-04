@@ -2,11 +2,16 @@
     hx-get="/slots/fragment{% if admin_mode %}?mode=admin{% endif %}" hx-trigger="refresh-slots from:body"
     hx-swap="outerHTML" hx-sync="body:queue last" aria-labelledby="slots-heading">
     <h2 id="slots-heading" class="sr-only" tabindex="-1">Upcoming slots</h2>
+    <div class="overview-intro">
+    <p class="booking-help">Pick a slot and join. If the player list is full, join the waitlist. When a player cancels, the first person in line moves up automatically.</p>
+    <div class="admin-entry">
     {% if current_user_is_admin %}
     <form action="/admin/logout" method="post"><button class="btn btn-small" type="submit">Leave Admin</button></form>
     {% else %}
     <a class="btn btn-small" href="/admin/login">Admin UI</a>
     {% endif %}
+    </div>
+    </div>
     {% if admin_mode %}
     <p class="admin-mode-label">Admin mode</p>
     <a class="btn btn-secondary" href="/admin/schedule">Edit recurring schedule</a>
@@ -15,7 +20,6 @@
     </form>
     {% if !generation_feedback.is_empty() %}<p role="status">{{ generation_feedback }}</p>{% endif %}
     {% endif %}
-    <p class="booking-help">Pick a slot and join. If the player list is full, join the waitlist. When a player cancels, the first person in line moves up automatically.</p>
     {% if weeks.is_empty() %}
     <div class="card empty-state"><h2>No upcoming slots</h2><p>Please check again soon. New games open on Sunday evening.</p></div>
     {% endif %}

@@ -13,6 +13,7 @@
         </select>
         <label for="time-{{ schedule.id }}">Berlin time</label><input id="time-{{ schedule.id }}" type="time" name="time_local" value="{{ schedule.time_local }}" required>
         <label for="venue-{{ schedule.id }}">Location</label><input id="venue-{{ schedule.id }}" name="venue" maxlength="120" value="{{ schedule.venue }}" required>
+        <label for="map-{{ schedule.id }}">Maps link (optional)</label><input id="map-{{ schedule.id }}" type="url" name="map_url" maxlength="2048" value="{{ schedule.map_url }}">
         <label for="players-{{ schedule.id }}">Player capacity</label><input id="players-{{ schedule.id }}" type="number" name="max_players" min="1" max="100" value="{{ schedule.max_players }}" required>
         <label for="waiting-{{ schedule.id }}">Waitlist capacity</label><input id="waiting-{{ schedule.id }}" type="number" name="max_waitlist" min="0" max="100" value="{{ schedule.max_waitlist }}" required>
         <label><input type="checkbox" name="is_active" {% if schedule.is_active %}checked{% endif %}> Active</label>
@@ -24,6 +25,7 @@
         <label for="new-day">Weekday</label><select id="new-day" name="weekday"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="7">Sunday</option></select>
         <label for="new-time">Berlin time</label><input id="new-time" type="time" name="time_local" required>
         <label for="new-venue">Location</label><input id="new-venue" name="venue" maxlength="120" required>
+        <label for="new-map">Maps link (optional)</label><input id="new-map" type="url" name="map_url" maxlength="2048">
         <label for="new-players">Player capacity</label><input id="new-players" type="number" name="max_players" min="1" max="100" value="15" required>
         <label for="new-waiting">Waitlist capacity</label><input id="new-waiting" type="number" name="max_waitlist" min="0" max="100" value="5" required>
         <label><input type="checkbox" name="is_active" checked> Active</label>

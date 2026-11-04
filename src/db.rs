@@ -146,6 +146,7 @@ pub(crate) struct GameEdit {
     pub revision: i64,
     pub datetime: DateTime<Utc>,
     pub venue: String,
+    pub map_url: Option<String>,
     pub clear_bookings: Option<bool>,
 }
 
@@ -155,12 +156,14 @@ pub(crate) async fn edit_game(pool: &SqlitePool, edit: &GameEdit) -> Result<(), 
     if edit.datetime <= Utc::now() {
         return Err(AppError::BadRequest("Choose a future time.".into()));
     }
-    let row = sqlx::query("SELECT datetime, venue, schedule_id FROM slots WHERE id = ?")
+    let row = sqlx::query("SELECT datetime, venue, map_url, schedule_id FROM slots WHERE id = ?")
         .bind(edit.slot_id)
         .fetch_one(&mut *tx)
         .await?;
     let old_datetime: String = row.try_get("datetime")?;
     let old_venue: String = row.try_get("venue")?;
+    let old_map_url: String = row.try_get("map_url")?;
+    let map_url = edit.map_url.as_deref().unwrap_or(&old_map_url);
     let old = DateTime::parse_from_rfc3339(&old_datetime)
         .map_err(|_| AppError::BadRequest("The existing game time is invalid.".into()))?;
     if old.with_timezone(&Utc) <= Utc::now() {
@@ -169,6 +172,14 @@ pub(crate) async fn edit_game(pool: &SqlitePool, edit: &GameEdit) -> Result<(), 
         ));
     }
     if old.with_timezone(&Utc) == edit.datetime && old_venue == edit.venue {
+        if old_map_url != map_url {
+            sqlx::query("UPDATE slots SET map_url = ?, revision = revision + 1 WHERE id = ?")
+                .bind(map_url)
+                .bind(edit.slot_id)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+        }
         return Ok(());
     }
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bookings WHERE slot_id = ?")
@@ -203,9 +214,9 @@ pub(crate) async fn edit_game(pool: &SqlitePool, edit: &GameEdit) -> Result<(), 
             .execute(&mut *tx)
             .await?;
     }
-    sqlx::query("UPDATE slots SET datetime = ?, venue = ?, is_override = 1, revision = revision + 1 WHERE id = ?")
+    sqlx::query("UPDATE slots SET datetime = ?, venue = ?, map_url = ?, is_override = 1, revision = revision + 1 WHERE id = ?")
         .bind(edit.datetime.to_rfc3339_opts(SecondsFormat::Secs, true))
-        .bind(&edit.venue).bind(edit.slot_id).execute(&mut *tx).await?;
+        .bind(&edit.venue).bind(map_url).bind(edit.slot_id).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -243,6 +254,7 @@ struct SlotSchedule {
     weekday: i64,
     time_local: String,
     venue: String,
+    map_url: String,
     max_players: i64,
     max_waitlist: i64,
 }
@@ -267,10 +279,12 @@ pub async fn init_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
         connect_options = connect_options.create_if_missing(true);
     }
 
-    let pool = SqlitePoolOptions::new()
-        .max_connections(max_connections)
-        .connect_with(connect_options)
-        .await?;
+    let mut pool_options = SqlitePoolOptions::new().max_connections(max_connections);
+    if database_url == "sqlite::memory:" {
+        // Closing the only connection destroys the in-memory database.
+        pool_options = pool_options.idle_timeout(None).max_lifetime(None);
+    }
+    let pool = pool_options.connect_with(connect_options).await?;
 
     sqlx::query("PRAGMA foreign_keys = ON;")
         .execute(&pool)
@@ -449,8 +463,8 @@ pub(crate) async fn create_upcoming_slots_report(
                 .single()
                 .ok_or_else(|| sqlx::Error::Protocol("invalid local date".into()))?;
             let result = sqlx::query(
-                "INSERT INTO slots (datetime, venue, max_players, max_waitlist, schedule_id, occurrence_date)
-                 SELECT ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (
+                "INSERT INTO slots (datetime, venue, map_url, max_players, max_waitlist, schedule_id, occurrence_date)
+                 SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (
                      SELECT 1 FROM slots WHERE schedule_id IS NULL AND venue = ?
                      AND julianday(datetime) >= julianday(?) AND julianday(datetime) < julianday(?)
                  ) AND NOT EXISTS (
@@ -459,6 +473,7 @@ pub(crate) async fn create_upcoming_slots_report(
             )
             .bind(datetime)
             .bind(&schedule.venue)
+            .bind(&schedule.map_url)
             .bind(schedule.max_players)
             .bind(schedule.max_waitlist)
             .bind(schedule.id)
@@ -506,6 +521,7 @@ pub async fn list_slots_at(
             s.is_override,
             s.datetime,
             s.venue,
+            s.map_url,
             s.max_players,
             s.max_waitlist,
             b.is_waitlist,
@@ -549,6 +565,7 @@ pub async fn find_slot(pool: &SqlitePool, slot_id: i64) -> Result<Option<Slot>, 
             s.is_override,
             s.datetime,
             s.venue,
+            s.map_url,
             s.max_players,
             s.max_waitlist,
             b.is_waitlist,
@@ -887,7 +904,7 @@ async fn list_active_slot_schedules(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
 ) -> Result<Vec<SlotSchedule>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT id, weekday, time_local, venue, max_players, max_waitlist
+        "SELECT id, weekday, time_local, venue, map_url, max_players, max_waitlist
          FROM slot_schedules
          WHERE is_active = 1",
     )
@@ -901,6 +918,7 @@ async fn list_active_slot_schedules(
                 weekday: row.try_get("weekday")?,
                 time_local: row.try_get("time_local")?,
                 venue: row.try_get("venue")?,
+                map_url: row.try_get("map_url")?,
                 max_players: row.try_get("max_players")?,
                 max_waitlist: row.try_get("max_waitlist")?,
             })
@@ -937,6 +955,7 @@ fn slots_from_rows(rows: Vec<SqliteRow>) -> Result<Vec<Slot>, sqlx::Error> {
                 is_override: row.get::<i64, _>("is_override") != 0,
                 datetime: row.get("datetime"),
                 venue: row.get("venue"),
+                map_url: row.get("map_url"),
                 max_players: usize::try_from(row.try_get::<i64, _>("max_players")?)
                     .map_err(|error| sqlx::Error::Decode(Box::new(error)))?,
                 max_waitlist: usize::try_from(row.try_get::<i64, _>("max_waitlist")?)
@@ -1072,6 +1091,15 @@ mod tests {
     use sqlx::Row;
 
     use super::{create_upcoming_slots, init_pool, seed_preview_roster};
+
+    #[tokio::test]
+    async fn memory_database_connection_does_not_expire() {
+        let pool = init_pool("sqlite::memory:").await.unwrap();
+        assert_eq!(pool.options().get_max_connections(), 1);
+        assert_eq!(pool.options().get_idle_timeout(), None);
+        assert_eq!(pool.options().get_max_lifetime(), None);
+        create_upcoming_slots(&pool, Utc::now()).await.unwrap();
+    }
 
     #[tokio::test]
     async fn new_database_has_no_players_or_bookings() {

@@ -979,7 +979,7 @@ async fn post_slots_signup_adds_player_and_highlights_current_user() {
     assert!(body.contains("id=\"slot-3\""));
     assert!(body.contains("Farid"));
     assert!(body.contains("current-player"));
-    assert!(body.contains("Booking saved. Confirmed player."));
+    assert!(body.contains("Booking saved. Confirmed 🏀."));
     assert!(!body.contains(">You<"));
 
     let booking =

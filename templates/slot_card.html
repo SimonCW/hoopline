@@ -4,7 +4,7 @@
     <div class="slot-heading">
         <div>
             <h3 id="slot-title-{{ slot.id }}" tabindex="-1">{{ slot.datetime_label_de() }}</h3>
-            <p class="venue">{{ slot.venue }}</p>
+            <p class="venue">{% if !slot.map_url.is_empty() %}<a href="{{ slot.map_url }}" target="_blank" rel="noopener noreferrer" aria-label="{{ slot.venue }} (opens map in a new tab)">{{ slot.venue }}</a>{% else %}{{ slot.venue }}{% endif %}</p>
             {% if slot.is_override %}<p class="muted">Changed game</p>{% endif %}
         </div>
         <p class="booking-status {% if slot.user_is_signed_up(current_user_id) %}is-booked{% endif %}" data-testid="booking-status">{{ slot.booking_status(current_user_id) }}</p>

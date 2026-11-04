@@ -7,7 +7,7 @@
     <form action="/admin/login" method="post" class="identity-form">
         <input type="hidden" name="user_id" value="{{ user_id }}">
         <label for="admin-password">Password</label>
-        <input id="admin-password" name="password" type="password" autocomplete="current-password" required>
+        <input id="admin-password" name="password" type="password" autocomplete="current-password" autofocus required>
         <button type="submit" class="btn btn-primary">Enter admin UI</button>
     </form>
     <a href="/slots">Back to games</a>

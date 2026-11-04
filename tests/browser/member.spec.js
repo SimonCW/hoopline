@@ -31,16 +31,16 @@ test('compact cards, remembered identity, signup and safe cancellation', async (
   const card = page.getByTestId('slot-card').first();
   await expect(card.locator('.roster')).not.toHaveAttribute('open', '');
   await card.getByRole('button', { name: 'Sign Up', exact: true }).click();
-  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
   await expect(card.locator('[data-feedback]')).toContainText('Booking saved');
   await expect(page.locator('#announcements')).toContainText('Booking saved');
   await card.locator('.roster > summary').click();
   await expect(card.locator('.current-player')).toBeVisible();
   await page.reload();
-  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
   page.once('dialog', dialog => dialog.dismiss());
   await card.getByRole('button', { name: 'Cancel booking' }).click();
-  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
   page.once('dialog', dialog => dialog.accept());
   await card.getByRole('button', { name: 'Cancel booking' }).click();
   await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
@@ -138,7 +138,7 @@ test('slow request disables repeat submits and keeps roster open', async ({ page
   await card.locator('form').first().evaluate(form => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
   expect(requests).toBe(1);
   release();
-  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
   await expect(card.locator('.roster')).toHaveAttribute('open', '');
   await expect(card.locator('h3')).toBeFocused();
   page.once('dialog', dialog => dialog.accept());
@@ -155,7 +155,7 @@ test('focus refresh discovers a booking made in another session', async ({ page,
   await request.post(`/slots/${slotId}/signup`, { headers: { Cookie: cookie, 'X-Hoopline-User': identity.value } });
   await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
   page.once('dialog', dialog => dialog.accept());
   await card.getByRole('button', { name: 'Cancel booking' }).click();
   await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
@@ -180,7 +180,7 @@ test('waitlist status updates after automatic promotion', async ({ page, request
     await expect(card.locator('[data-feedback]')).toContainText('Waitlist #1');
     await request.post(`/slots/${slotId}/cancel`, { headers: { Cookie: cookies[0], 'X-Hoopline-User': cookies[0].split('=')[1] } });
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-    await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+    await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
     await card.locator('.roster > summary').click();
     await expect(card.locator('.current-player')).toContainText(name);
     page.once('dialog', dialog => dialog.accept());
@@ -202,7 +202,7 @@ test('member forms and expanded rosters pass automated accessibility checks', as
   await createMember(page);
   const card = page.getByTestId('slot-card').first();
   await card.getByRole('button', { name: 'Sign Up', exact: true }).click();
-  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
   await card.locator('.roster > summary').click();
   const bookedResults = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
@@ -263,7 +263,7 @@ test('failed cancellation keeps the booking and hides old success feedback', asy
   page.once('dialog', dialog => dialog.accept());
   await card.getByRole('button', { name: 'Cancel booking' }).click();
   await expect(card.getByRole('alert')).toContainText('System busy');
-  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
   await expect(card.locator('[data-feedback]')).toBeHidden();
   await page.unroute('**/slots/*/cancel');
   page.once('dialog', dialog => dialog.accept());
@@ -297,7 +297,7 @@ test('cookie remembers a member until logout, without cancelling their booking',
   expect(identity.expires).toBeGreaterThan(Date.now() / 1000 + 350 * 86400);
   const card = page.getByTestId('slot-card').first();
   await card.getByRole('button', { name: 'Sign Up', exact: true }).click();
-  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
   await page.goto('/');
   await expect(page.locator('.identity-name')).toHaveText(name);
   await expect(page.getByRole('combobox')).toHaveCount(0);
@@ -310,7 +310,7 @@ test('cookie remembers a member until logout, without cancelling their booking',
   await page.getByRole('combobox').fill(name);
   await page.getByRole('option', { name, exact: true }).click();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
   page.once('dialog', dialog => dialog.accept());
   await card.getByRole('button', { name: 'Cancel booking' }).click();
   await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
@@ -334,7 +334,7 @@ for (const action of ['signup', 'cancel']) {
     const card = page.getByTestId('slot-card').first();
     if (action === 'cancel') {
       await card.getByRole('button', { name: 'Sign Up', exact: true }).click();
-      await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+      await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
     }
     let release;
     let captured;
@@ -366,7 +366,7 @@ for (const action of ['signup', 'cancel']) {
     await expect(page.locator('#booking-request-status')).toBeHidden();
     if (action === 'cancel') page.once('dialog', dialog => dialog.accept());
     await button.click();
-    await expect(card.getByTestId('booking-status')).toHaveText(action === 'signup' ? 'Confirmed player' : 'Not booked');
+    await expect(card.getByTestId('booking-status')).toHaveText(action === 'signup' ? 'Confirmed 🏀' : 'Not booked');
     expect(requests).toHaveLength(1);
     if (action === 'signup') {
       page.once('dialog', dialog => dialog.accept());
@@ -492,7 +492,7 @@ test('booking feedback does not resize the card or button', async ({ page }) => 
   await expect(page.locator('.refresh-icon')).toHaveCSS('animation-name', 'none');
   expect(await overviewLayout(page)).toEqual(before);
   release();
-  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+  await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
   await expect(card.locator('.slot-actions button')).toBeEnabled();
   expect(await overviewLayout(page)).toEqual(before);
   await expect(page.locator('#announcements')).toContainText('Booking saved');
@@ -548,7 +548,7 @@ for (const action of ['signup', 'cancel']) {
     const slotId = (await card.getAttribute('id')).replace('slot-', '');
     if (action === 'cancel') {
       await card.getByRole('button', { name: 'Sign Up', exact: true }).click();
-      await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+      await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
     }
     await page.route('**/slots/fragment', route => route.fulfill({
       status: 503, contentType: 'text/html', body: '<main><p>Refresh failed. Try again.</p></main>',
@@ -561,7 +561,7 @@ for (const action of ['signup', 'cancel']) {
     expect(newId).not.toBe(oldId);
     if (action === 'cancel') {
       await otherTab.getByTestId('slot-card').first().getByRole('button', { name: 'Sign Up', exact: true }).click();
-      await expect(otherTab.getByTestId('slot-card').first().getByTestId('booking-status')).toHaveText('Confirmed player');
+      await expect(otherTab.getByTestId('slot-card').first().getByTestId('booking-status')).toHaveText('Confirmed 🏀');
     }
     await page.bringToFront();
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -576,7 +576,7 @@ for (const action of ['signup', 'cancel']) {
     expect(headers['x-hoopline-user']).toBe(oldId);
     expect(headers.cookie).toContain(`user_id=${newId}`);
     await expect(card.getByRole('alert')).toContainText('Your selected name changed');
-    await expect(card.getByTestId('booking-status')).toHaveText(action === 'signup' ? 'Not booked' : 'Confirmed player');
+    await expect(card.getByTestId('booking-status')).toHaveText(action === 'signup' ? 'Not booked' : 'Confirmed 🏀');
     // Both accounts must be unchanged, not merely the stale card in this tab.
     for (const id of [oldId, newId]) {
       const headers = { Cookie: `user_id=${id}`, 'X-Hoopline-User': id };
@@ -588,7 +588,7 @@ for (const action of ['signup', 'cancel']) {
     await expect(page.locator('.identity-name')).toHaveText(newName);
     await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
     await card.getByRole('button', { name: 'Sign Up', exact: true }).click();
-    await expect(card.getByTestId('booking-status')).toHaveText('Confirmed player');
+    await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
     page.once('dialog', dialog => dialog.accept());
     await card.getByRole('button', { name: 'Cancel booking' }).click();
     await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
