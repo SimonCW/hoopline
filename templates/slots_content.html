@@ -1,7 +1,19 @@
 <section id="slots-content" class="slots-content"
-    hx-get="/slots/fragment" hx-trigger="refresh-slots from:body"
+    hx-get="/slots/fragment{% if admin_mode %}?mode=admin{% endif %}" hx-trigger="refresh-slots from:body"
     hx-swap="outerHTML" hx-sync="body:queue last" aria-labelledby="slots-heading">
     <h2 id="slots-heading" class="sr-only" tabindex="-1">Upcoming slots</h2>
+    {% if current_user_is_admin %}
+    <nav class="mode-switch" aria-label="View mode">
+        <a class="btn btn-small" href="/slots" {% if !admin_mode %}aria-current="page"{% endif %}>Member view</a>
+        <a class="btn btn-small" href="/slots?mode=admin" {% if admin_mode %}aria-current="page"{% endif %}>Admin mode</a>
+    </nav>
+    {% endif %}
+    {% if admin_mode %}
+    <p class="admin-mode-label">Admin mode</p>
+    <form hx-post="/admin/slots/generate" hx-target="#slots-content" hx-swap="outerHTML" hx-sync="body:drop" hx-headers='{"X-Hoopline-User": "{{ current_user_id.unwrap_or_default() }}"}'>
+        <button type="submit" class="btn btn-secondary">Generate next 2 weeks</button>
+    </form>
+    {% endif %}
     <p class="booking-help">Pick a slot and join. If the player list is full, join the waitlist. When a player cancels, the first person in line moves up automatically.</p>
     {% if weeks.is_empty() %}
     <div class="card empty-state"><h2>No upcoming slots</h2><p>Please check again soon. New slots open automatically for the next 14 days.</p></div>

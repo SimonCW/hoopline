@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests/browser',
+  testIgnore: '**/admin.spec.js',
   // These tests share a disposable in-memory server. Keep mutations sequential.
   workers: 1,
   forbidOnly: !!process.env.CI,

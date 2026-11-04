@@ -1,5 +1,7 @@
 # Initial Plan - Basketball Slot Booking App
 
+This is the original scope. For current priorities and open tasks, see `refinements.md`.
+
 ## Problem Summary
 
 Replace a Google Spreadsheet for booking basketball slots (61 members, 3 weekly slots, 15 players + 5 waitlist each). Main pain points: manual waitlist promotion and admin overhead.
@@ -28,16 +30,17 @@ Replace a Google Spreadsheet for booking basketball slots (61 members, 3 weekly 
 ### Features
 
 **User-facing:**
-- [ ] View upcoming slots (next 2 weeks)
-- [ ] See who's signed up + waitlist for each slot
-- [ ] Pick your name from dropdown (remembered via cookie)
-- [ ] Sign up for a slot (goes to waitlist if full)
-- [ ] Cancel your booking (auto-promotes waitlist #1)
+- [x] View upcoming slots (currently a rolling 14-day window; Sunday release is planned)
+- [x] See who's signed up + waitlist for each slot
+- [x] Pick your name from dropdown (remembered via cookie)
+- [x] Sign up for a slot (goes to waitlist if full)
+- [x] Cancel your booking (auto-promotes waitlist #1)
 
 **Admin-facing:**
-- [ ] Slots auto-create on schedule (e.g., every Sunday for 2 weeks out)
-- [ ] Manual override: move/remove players, promote from waitlist
-- [ ] Simple admin UI (no SQL knowledge needed)
+- [x] Slots auto-create on a rolling schedule.
+- [ ] Switch generation to the agreed Sunday 19:00 Berlin release. Sunday 8 November 2026 opens the week of 16–22 November. Keep already-created games and bookings.
+- [ ] Manual override: removal and promotion exist; arbitrary reassignment remains open.
+- [ ] Simple admin UI: existing controls support removal and promotion; full editing remains open.
 
 ### Data Model
 ```
@@ -76,9 +79,7 @@ Booking: id, slot_id, user_id, position, is_waitlist, created_at
 
 ## Next Steps
 
-1. Decide on hosting approach
-2. Set up SQLite schema
-3. Build the slot list view
-4. Add sign-up / cancel with waitlist logic
-5. Add admin override UI
-6. Deploy and test with a few people
+1. Build the admin experience using `admin_experience.md` in three increments: mode/rosters, individual game edits, then recurring defaults and Sunday release. Keep authentication changes out of scope.
+2. Make backups safe and verify a restore and persistent deployment storage.
+3. Confirm the no-auth policy and separate sample data before a user trial.
+4. Test with members on real devices and resolve the open schedule and language decisions.

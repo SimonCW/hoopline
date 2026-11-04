@@ -37,6 +37,167 @@ async fn insert_waitlist_booking(
 }
 
 #[tokio::test]
+async fn booking_mutations_increment_revision_once_and_failures_do_not() {
+    let pool = test_pool().await;
+    let before = db::find_slot(&pool, 1).await.unwrap().unwrap().revision;
+    assert_eq!(
+        db::signup_for_slot(&pool, 1, 7).await.unwrap(),
+        db::SignupOutcome::AddedPlayer
+    );
+    assert_eq!(
+        db::find_slot(&pool, 1).await.unwrap().unwrap().revision,
+        before + 1
+    );
+    assert_eq!(
+        db::signup_for_slot(&pool, 1, 7).await.unwrap(),
+        db::SignupOutcome::AlreadySignedUp
+    );
+    assert_eq!(
+        db::find_slot(&pool, 1).await.unwrap().unwrap().revision,
+        before + 1
+    );
+    assert_eq!(
+        db::cancel_booking_for_slot(&pool, 1, 7).await.unwrap(),
+        db::CancelOutcome::Cancelled
+    );
+    assert_eq!(
+        db::find_slot(&pool, 1).await.unwrap().unwrap().revision,
+        before + 2
+    );
+    assert_eq!(
+        db::cancel_booking_for_slot(&pool, 1, 7).await.unwrap(),
+        db::CancelOutcome::NotSignedUp
+    );
+    assert_eq!(
+        db::find_slot(&pool, 1).await.unwrap().unwrap().revision,
+        before + 2
+    );
+}
+
+#[tokio::test]
+async fn admin_mode_is_explicit_and_requires_admin_identity() {
+    let pool = test_pool().await;
+    for (cookie, uri, expected) in [
+        ("user_id=1", "/slots", false),
+        ("user_id=1", "/slots?mode=admin", true),
+        ("user_id=1", "/slots/fragment?mode=admin", true),
+        ("user_id=2", "/slots?mode=admin", false),
+    ] {
+        let response = app_with_pool(pool.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::COOKIE, cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response_body_string(response).await;
+        assert_eq!(body.contains("admin-mode-card"), expected, "{cookie} {uri}");
+    }
+}
+
+#[tokio::test]
+async fn admin_can_append_members_and_reorder_waitlist_with_revision_checks() {
+    let pool = test_pool().await;
+    let app = app_with_pool(pool.clone());
+    let post = |uri: &str, body: &str, cookie: &str| {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(header::COOKIE, cookie)
+            .header(
+                "x-hoopline-user",
+                if cookie == "user_id=1" { "1" } else { "2" },
+            )
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let add = "/admin/slots/1/add";
+    let response = app
+        .clone()
+        .oneshot(post(add, "user_id=7&revision=0&list=waitlist", "user_id=2"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let response = app
+        .clone()
+        .oneshot(post(add, "user_id=7&revision=0&list=waitlist", "user_id=1"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = app
+        .clone()
+        .oneshot(post(add, "user_id=8&revision=0&list=waitlist", "user_id=1"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let response = app
+        .clone()
+        .oneshot(post(add, "user_id=8&revision=1&list=waitlist", "user_id=1"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = app
+        .clone()
+        .oneshot(post(
+            "/admin/slots/1/move/8",
+            "revision=2&direction=up",
+            "user_id=1",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let slot = db::find_slot(&pool, 1).await.unwrap().unwrap();
+    assert_eq!(slot.waitlist_user_ids, vec![8, 7]);
+    assert_eq!(slot.revision, 3);
+    let response = app
+        .oneshot(post(
+            "/admin/slots/1/move/8",
+            "revision=3&direction=up",
+            "user_id=1",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(db::find_slot(&pool, 1).await.unwrap().unwrap().revision, 3);
+}
+
+#[tokio::test]
+async fn stale_admin_remove_and_promote_leave_bookings_unchanged() {
+    let pool = test_pool().await;
+    insert_waitlist_booking(&pool, 1, 7, 1).await;
+    assert_eq!(
+        db::signup_for_slot(&pool, 1, 8).await.unwrap(),
+        db::SignupOutcome::AddedPlayer
+    );
+    let app = app_with_pool(pool.clone());
+    for uri in ["/admin/slots/1/remove/2", "/admin/slots/1/promote/7"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header(header::COOKIE, "user_id=1")
+                    .header("x-hoopline-user", "1")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from("revision=0"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+    let slot = db::find_slot(&pool, 1).await.unwrap().unwrap();
+    assert!(slot.player_user_ids.contains(&2));
+    assert_eq!(slot.waitlist_user_ids, vec![7]);
+    assert_eq!(slot.revision, 1);
+}
+
+#[tokio::test]
 async fn get_root_returns_ok_and_body() {
     let pool = test_pool().await;
     let app = app_with_pool(pool);
@@ -226,7 +387,7 @@ async fn get_users_shows_admin_tools_for_admin_cookie() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_body_string(response).await;
-    assert!(body.contains("Admin tools"));
+    assert!(!body.contains("Admin tools"));
 }
 
 #[tokio::test]
@@ -552,7 +713,8 @@ async fn post_admin_remove_triggers_waitlist_promotion() {
                 .uri("/admin/slots/1/remove/2")
                 .header(header::COOKIE, "user_id=1")
                 .header("x-hoopline-user", "1")
-                .body(Body::empty())
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("revision=0"))
                 .unwrap(),
         )
         .await
@@ -603,7 +765,8 @@ async fn post_admin_promote_moves_target_from_waitlist_to_players() {
                 .uri("/admin/slots/3/promote/4")
                 .header(header::COOKIE, "user_id=1")
                 .header("x-hoopline-user", "1")
-                .body(Body::empty())
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("revision=0"))
                 .unwrap(),
         )
         .await

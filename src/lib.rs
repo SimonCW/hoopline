@@ -2,12 +2,14 @@ pub mod db;
 pub mod error;
 mod identity;
 pub mod models;
+pub mod scheduling;
 
 use crate::{
     db::{
-        CancelOutcome, PromoteOutcome, SignupOutcome, cancel_booking_for_slot,
-        create_upcoming_slots, create_user, find_slot, find_user_by_id, find_user_by_name,
-        list_slots, list_users, promote_waitlist_user, signup_for_slot,
+        CancelOutcome, MoveDirection, PromoteOutcome, RosterList, SignupOutcome, admin_add_member,
+        admin_move_waiter, cancel_booking_checked, cancel_booking_for_slot, create_upcoming_slots,
+        create_user, find_slot, find_user_by_id, find_user_by_name, list_slots, list_users,
+        promote_waitlist_checked, signup_for_slot,
     },
     identity::{AdminIdentity, BookingIdentity, current_user_from_headers},
     models::{Slot, SlotWeek, UserIdentity, group_slots},
@@ -15,7 +17,7 @@ use crate::{
 use askama::Template;
 use axum::{
     Form, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, HeaderName, HeaderValue, header},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -35,6 +37,8 @@ struct SlotsTemplate {
     title: String,
     current_user_id: Option<i64>,
     current_user_is_admin: bool,
+    admin_mode: bool,
+    users: Vec<UserIdentity>,
     weeks: Vec<SlotWeek>,
 }
 
@@ -51,6 +55,8 @@ struct SlotsContentTemplate {
     identity_refresh_html: String,
     current_user_id: Option<i64>,
     current_user_is_admin: bool,
+    admin_mode: bool,
+    users: Vec<UserIdentity>,
     weeks: Vec<SlotWeek>,
 }
 
@@ -60,7 +66,38 @@ struct SlotCardTemplate {
     slot: Slot,
     current_user_id: Option<i64>,
     current_user_is_admin: bool,
+    admin_mode: bool,
+    users: Vec<UserIdentity>,
     feedback: String,
+}
+
+#[derive(Deserialize)]
+struct AdminAddForm {
+    user_id: i64,
+    revision: i64,
+    list: RosterList,
+}
+
+#[derive(Deserialize)]
+struct AdminMoveForm {
+    revision: i64,
+    direction: MoveDirection,
+}
+
+#[derive(Deserialize)]
+struct RevisionForm {
+    revision: i64,
+}
+
+#[derive(Default, Deserialize)]
+struct ViewQuery {
+    mode: Option<String>,
+}
+
+impl ViewQuery {
+    fn admin_mode(&self, is_admin: bool) -> bool {
+        is_admin && self.mode.as_deref() == Some("admin")
+    }
 }
 
 #[derive(Template)]
@@ -70,7 +107,6 @@ struct UserSelectorTemplate {
     users: Vec<UserIdentity>,
     selected_user_id: Option<i64>,
     current_user_label: String,
-    current_user_is_admin: bool,
 }
 
 #[derive(Deserialize)]
@@ -122,6 +158,11 @@ pub fn app_with_pool(pool: SqlitePool) -> Router {
         .route("/slots/fragment", get(slots_fragment))
         .route("/slots/{slot_id}/signup", post(signup_slot))
         .route("/slots/{slot_id}/cancel", post(cancel_slot))
+        .route("/admin/slots/{slot_id}/add", post(admin_add_slot_user))
+        .route(
+            "/admin/slots/{slot_id}/move/{user_id}",
+            post(admin_move_slot_user),
+        )
         .route(
             "/admin/slots/{slot_id}/remove/{user_id}",
             post(admin_remove_slot_user),
@@ -157,6 +198,7 @@ pub fn app_with_pool(pool: SqlitePool) -> Router {
 
 async fn index(
     State(pool): State<SqlitePool>,
+    Query(view): Query<ViewQuery>,
     headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
     let current_user = current_user_from_headers(&pool, &headers).await?;
@@ -175,6 +217,12 @@ async fn index(
         title: "Hoopline".to_string(),
         current_user_id,
         current_user_is_admin,
+        admin_mode: view.admin_mode(current_user_is_admin),
+        users: if view.admin_mode(current_user_is_admin) {
+            list_users(&pool).await?
+        } else {
+            Vec::new()
+        },
         weeks: group_slots(list_slots(&pool).await?),
     };
     Ok(Html(template.render()?))
@@ -182,6 +230,7 @@ async fn index(
 
 async fn slots_fragment(
     State(pool): State<SqlitePool>,
+    Query(view): Query<ViewQuery>,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
     let current_user = current_user_from_headers(&pool, &headers).await?;
@@ -194,6 +243,12 @@ async fn slots_fragment(
         identity_refresh_html: render_user_selector(&pool, current_user.as_ref(), true).await?,
         current_user_id,
         current_user_is_admin,
+        admin_mode: view.admin_mode(current_user_is_admin),
+        users: if view.admin_mode(current_user_is_admin) {
+            list_users(&pool).await?
+        } else {
+            Vec::new()
+        },
         weeks: group_slots(list_slots(&pool).await?),
     };
     Ok(Html(template.render()?).into_response())
@@ -202,6 +257,7 @@ async fn slots_fragment(
 async fn signup_slot(
     State(pool): State<SqlitePool>,
     Path(slot_id): Path<i64>,
+    Query(view): Query<ViewQuery>,
     current_user: BookingIdentity,
 ) -> Result<Html<String>, AppError> {
     match signup_for_slot(&pool, slot_id, current_user.id()).await? {
@@ -237,6 +293,12 @@ async fn signup_slot(
         slot,
         current_user_id: Some(current_user.id()),
         current_user_is_admin: current_user.is_admin(),
+        admin_mode: view.admin_mode(current_user.is_admin()),
+        users: if view.admin_mode(current_user.is_admin()) {
+            list_users(&pool).await?
+        } else {
+            Vec::new()
+        },
     };
     Ok(Html(template.render()?))
 }
@@ -244,6 +306,7 @@ async fn signup_slot(
 async fn cancel_slot(
     State(pool): State<SqlitePool>,
     Path(slot_id): Path<i64>,
+    Query(view): Query<ViewQuery>,
     current_user: BookingIdentity,
 ) -> Result<Html<String>, AppError> {
     match cancel_booking_for_slot(&pool, slot_id, current_user.id()).await? {
@@ -256,6 +319,12 @@ async fn cancel_slot(
         CancelOutcome::SlotNotFound => {
             return Err(AppError::BadRequest("slot does not exist".to_string()));
         }
+        CancelOutcome::Stale => return Err(AppError::StaleSlot),
+        CancelOutcome::Started => {
+            return Err(AppError::BadRequest(
+                "This game has already started.".into(),
+            ));
+        }
     }
 
     let slot = find_slot(&pool, slot_id)
@@ -266,6 +335,12 @@ async fn cancel_slot(
         slot,
         current_user_id: Some(current_user.id()),
         current_user_is_admin: current_user.is_admin(),
+        admin_mode: view.admin_mode(current_user.is_admin()),
+        users: if view.admin_mode(current_user.is_admin()) {
+            list_users(&pool).await?
+        } else {
+            Vec::new()
+        },
     };
     Ok(Html(template.render()?))
 }
@@ -274,8 +349,9 @@ async fn admin_remove_slot_user(
     State(pool): State<SqlitePool>,
     Path((slot_id, user_id)): Path<(i64, i64)>,
     current_user: AdminIdentity,
+    Form(form): Form<RevisionForm>,
 ) -> Result<Html<String>, AppError> {
-    match cancel_booking_for_slot(&pool, slot_id, user_id).await? {
+    match cancel_booking_checked(&pool, slot_id, user_id, Some(form.revision)).await? {
         CancelOutcome::Cancelled => {}
         CancelOutcome::NotSignedUp => {
             return Err(AppError::BadRequest(
@@ -284,6 +360,12 @@ async fn admin_remove_slot_user(
         }
         CancelOutcome::SlotNotFound => {
             return Err(AppError::BadRequest("slot does not exist".to_string()));
+        }
+        CancelOutcome::Stale => return Err(AppError::StaleSlot),
+        CancelOutcome::Started => {
+            return Err(AppError::BadRequest(
+                "This game has already started.".into(),
+            ));
         }
     }
 
@@ -295,6 +377,8 @@ async fn admin_remove_slot_user(
         slot,
         current_user_id: Some(current_user.id()),
         current_user_is_admin: true,
+        admin_mode: true,
+        users: list_users(&pool).await?,
     };
     Ok(Html(template.render()?))
 }
@@ -303,8 +387,9 @@ async fn admin_promote_waitlist_user(
     State(pool): State<SqlitePool>,
     Path((slot_id, user_id)): Path<(i64, i64)>,
     current_user: AdminIdentity,
+    Form(form): Form<RevisionForm>,
 ) -> Result<Html<String>, AppError> {
-    match promote_waitlist_user(&pool, slot_id, user_id).await? {
+    match promote_waitlist_checked(&pool, slot_id, user_id, Some(form.revision)).await? {
         PromoteOutcome::Promoted => {}
         PromoteOutcome::NotWaitlisted => {
             return Err(AppError::BadRequest(
@@ -319,6 +404,12 @@ async fn admin_promote_waitlist_user(
         PromoteOutcome::SlotNotFound => {
             return Err(AppError::BadRequest("slot does not exist".to_string()));
         }
+        PromoteOutcome::Stale => return Err(AppError::StaleSlot),
+        PromoteOutcome::Started => {
+            return Err(AppError::BadRequest(
+                "This game has already started.".into(),
+            ));
+        }
     }
 
     let slot = find_slot(&pool, slot_id)
@@ -329,6 +420,8 @@ async fn admin_promote_waitlist_user(
         slot,
         current_user_id: Some(current_user.id()),
         current_user_is_admin: true,
+        admin_mode: true,
+        users: list_users(&pool).await?,
     };
     Ok(Html(template.render()?))
 }
@@ -342,9 +435,53 @@ async fn admin_generate_slots(
         identity_refresh_html: String::new(),
         current_user_id: Some(current_user.id()),
         current_user_is_admin: true,
+        admin_mode: true,
+        users: list_users(&pool).await?,
         weeks: group_slots(list_slots(&pool).await?),
     };
     Ok(Html(template.render()?))
+}
+
+async fn admin_add_slot_user(
+    State(pool): State<SqlitePool>,
+    Path(slot_id): Path<i64>,
+    current_user: AdminIdentity,
+    Form(form): Form<AdminAddForm>,
+) -> Result<Html<String>, AppError> {
+    admin_add_member(&pool, slot_id, form.user_id, form.revision, form.list).await?;
+    render_admin_card(&pool, slot_id, current_user.id(), "Member added.").await
+}
+
+async fn admin_move_slot_user(
+    State(pool): State<SqlitePool>,
+    Path((slot_id, user_id)): Path<(i64, i64)>,
+    current_user: AdminIdentity,
+    Form(form): Form<AdminMoveForm>,
+) -> Result<Html<String>, AppError> {
+    admin_move_waiter(&pool, slot_id, user_id, form.revision, form.direction).await?;
+    render_admin_card(&pool, slot_id, current_user.id(), "Waitlist updated.").await
+}
+
+async fn render_admin_card(
+    pool: &SqlitePool,
+    slot_id: i64,
+    user_id: i64,
+    feedback: &str,
+) -> Result<Html<String>, AppError> {
+    let slot = find_slot(pool, slot_id)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("Game does not exist.".into()))?;
+    Ok(Html(
+        SlotCardTemplate {
+            slot,
+            current_user_id: Some(user_id),
+            current_user_is_admin: true,
+            admin_mode: true,
+            users: list_users(pool).await?,
+            feedback: feedback.into(),
+        }
+        .render()?,
+    ))
 }
 
 async fn users_fragment(
@@ -372,7 +509,6 @@ async fn render_user_selector(
         selected_user_id: user.map(|user| user.id),
         current_user_label: user
             .map_or_else(|| "Select your name".into(), |user| user.name.clone()),
-        current_user_is_admin: user.is_some_and(|user| user.is_admin),
     };
     Ok(template.render()?)
 }

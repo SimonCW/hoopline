@@ -46,12 +46,5 @@
             <span>Refresh slots</span>
         </button>
     </div>
-    {% if current_user_is_admin %}
-    <details class="admin-tools"><summary>Admin tools</summary>
-        <form hx-post="/admin/slots/generate" hx-target="#slots-content" hx-swap="outerHTML" hx-sync="body:drop">
-            <button type="submit" class="btn btn-secondary">Generate next 2 weeks</button>
-        </form>
-    </details>
-    {% endif %}
 </header>
 {% endif %}
