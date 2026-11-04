@@ -35,7 +35,7 @@ stop-dev:
 
 # Start a disposable preview with a full game and three people waiting.
 preview: stop-dev
-  DATABASE_URL=sqlite::memory: PREVIEW_SAMPLE=1 PORT=5050 cargo run
+  ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin}" DATABASE_URL=sqlite::memory: PREVIEW_SAMPLE=1 PORT=5050 cargo run
 
 healthcheck db_mode="memory":
   db_mode="{{db_mode}}"; \
@@ -46,7 +46,7 @@ healthcheck db_mode="memory":
     db_url="sqlite::memory:"; \
   fi; \
   echo "healthcheck using $db_mode db ($db_url)"; \
-  DATABASE_URL="$db_url" cargo run >/tmp/hoopline-healthcheck.log 2>&1 & pid=$!; \
+  ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin}" DATABASE_URL="$db_url" cargo run >/tmp/hoopline-healthcheck.log 2>&1 & pid=$!; \
   i=0; \
   until curl -fsS http://127.0.0.1:5050/healthz >/dev/null 2>&1; do \
     i=$((i+1)); \

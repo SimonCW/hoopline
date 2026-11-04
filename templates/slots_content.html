@@ -3,10 +3,9 @@
     hx-swap="outerHTML" hx-sync="body:queue last" aria-labelledby="slots-heading">
     <h2 id="slots-heading" class="sr-only" tabindex="-1">Upcoming slots</h2>
     {% if current_user_is_admin %}
-    <nav class="mode-switch" aria-label="View mode">
-        <a class="btn btn-small" href="/slots" {% if !admin_mode %}aria-current="page"{% endif %}>Member view</a>
-        <a class="btn btn-small" href="/slots?mode=admin" {% if admin_mode %}aria-current="page"{% endif %}>Admin mode</a>
-    </nav>
+    <form action="/admin/logout" method="post"><button class="btn btn-small" type="submit">Leave Admin</button></form>
+    {% else %}
+    <a class="btn btn-small" href="/admin/login">Admin UI</a>
     {% endif %}
     {% if admin_mode %}
     <p class="admin-mode-label">Admin mode</p>

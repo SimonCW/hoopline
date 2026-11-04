@@ -30,17 +30,16 @@ Replace a Google Spreadsheet for booking basketball slots (61 members, 3 weekly 
 ### Features
 
 **User-facing:**
-- [x] View upcoming slots (currently a rolling 14-day window; Sunday release is planned)
+- [x] View eligible slots, including games through their Berlin calendar day.
 - [x] See who's signed up + waitlist for each slot
 - [x] Pick your name from dropdown (remembered via cookie)
 - [x] Sign up for a slot (goes to waitlist if full)
 - [x] Cancel your booking (auto-promotes waitlist #1)
 
 **Admin-facing:**
-- [x] Slots auto-create on a rolling schedule.
-- [ ] Switch generation to the agreed Sunday 19:00 Berlin release. Sunday 8 November 2026 opens the week of 16–22 November. Keep already-created games and bookings.
-- [ ] Manual override: removal and promotion exist; arbitrary reassignment remains open.
-- [ ] Simple admin UI: existing controls support removal and promotion; full editing remains open.
+- [x] Slots auto-create using the shared Sunday release. The initial time is 19:00 Berlin; Sunday 8 November 2026 opens 16–22 November. Already-created games and bookings remain.
+- [x] Admins can add and remove members, promote and reorder the waitlist.
+- [x] Admin UI supports individual game edits and recurring schedule defaults.
 
 ### Data Model
 ```
@@ -79,7 +78,7 @@ Booking: id, slot_id, user_id, position, is_waitlist, created_at
 
 ## Next Steps
 
-1. Build the admin experience using `admin_experience.md` in three increments: mode/rosters, individual game edits, then recurring defaults and Sunday release. Keep authentication changes out of scope.
+1. Verify the merged admin experience and its acceptance tests. See `admin_experience.md`.
 2. Make backups safe and verify a restore and persistent deployment storage.
 3. Confirm the no-auth policy and separate sample data before a user trial.
-4. Test with members on real devices and resolve the open schedule and language decisions.
+4. Test with members on real devices and confirm the release behavior and interface language.

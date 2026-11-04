@@ -12,7 +12,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'cargo run --locked',
-    env: { DATABASE_URL: 'sqlite::memory:', PORT: '5052' },
+    env: { DATABASE_URL: 'sqlite::memory:', PORT: '5052', ADMIN_PASSWORD: 'admin' },
     url: 'http://127.0.0.1:5052/healthz',
     reuseExistingServer: false,
     timeout: 120_000,

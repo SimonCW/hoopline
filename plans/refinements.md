@@ -2,24 +2,24 @@
 
 ## Current Status and Next Tasks (2026-11-04)
 
-- The `finish-admin-experience` branch implements admin roster controls, single-game editing, recurring defaults, and the Sunday release. Validate and review this branch before deployment; the no-auth and production safety tasks remain open.
+- [PR #3](https://github.com/SimonCW/hoopline/pull/3) merged admin mode, roster controls, single-game editing, recurring defaults, and the Sunday release. The PR has no recorded verification summary. Member identity and production safety tasks remain open.
 - Admin roster actions now run after a game starts; only the game editor keeps the started restriction. Member rules are unchanged. Approved for simplicity at about 20 requests per day.
 - [PR #1](https://github.com/SimonCW/hoopline/pull/1) merged signup, cancellation, waitlist routing, and automatic promotion.
 - [PR #2](https://github.com/SimonCW/hoopline/pull/2) merged the mobile member flow, rolling schedule, accessibility and browser tests, and stale-identity protection.
 - The PR checks are historical results. A merge does not verify production deployment, backup recovery, or real-device usability.
 
-### Next: Admin Experience, Then a Safe User Trial
+### Next: Prepare a Safe User Trial
 
-1. [ ] Build the admin experience described in R1. Keep admin authentication out of scope for this work.
-2. [ ] Make SQLite backups safe: remove the live-file `cp` fallback, require a consistent backup method, and test failure and restore paths. Verify persistent storage and restore a backup in the deployment environment.
-3. [ ] Confirm the no-auth policy with the group, including the ability to select an admin identity, before inviting users.
+1. [ ] Run `just verify`, `cargo build --locked`, and `just test-ui` on the merged code. Review any unchecked acceptance tests in `admin_experience.md`; do not assume the merge proves each test passed.
+2. [ ] Make SQLite backups safe: remove the live-file `cp` fallback in `scripts/backup-sqlite.sh`, require a consistent backup method, and test failure and restore paths. Verify persistent storage and restore a backup in the deployment environment.
+3. [ ] Confirm the unauthenticated member-identity policy with the group before inviting users. Admin access now uses a separate shared password; verify its deployment configuration.
 4. [ ] Separate sample data from production setup. Verify the deployed app, HTTPS cookie settings, legacy slot times, and persistence across a restart.
 5. [ ] Run the flow with members on real iOS and Android devices and with a screen reader. Verify the agreed Sunday release, Berlin times, interface language, and card layout.
 6. [ ] Add repeatable CI checks and define a required Rust toolchain. Reassess R3 and R4 after the admin experience is in use.
 
 ## Goal
 
-Improve the normal member experience first. Focus on clear slot information, simple booking actions, and mobile use. Delay admin editing work until the member flow is ready.
+Improve the member and admin experience, then validate it with the group before a user trial.
 
 ---
 
@@ -39,15 +39,15 @@ Improve the normal member experience first. Focus on clear slot information, sim
 
 ### Recommended Work Order
 
-Checked member UI items were merged in PR #2. Admin experience is the next feature. Preference decisions and real member testing remain open.
+Checked member UI items were merged in PR #2. PR #3 merged the admin experience. Preference decisions and real member testing remain open.
 
 #### 1. Make Slot Information Reliable
-- [x] Show upcoming slots only. Reject new bookings for slots that have started.
-- [x] Renew the rolling 14-day booking window automatically, checked every minute.
+- [x] Show games through their Berlin calendar day. Reject new bookings for slots that have started.
+- [x] Renew eligible games automatically, checked every minute.
 - [x] Generate and display new slots in `Europe/Berlin`, including daylight-saving changes.
 - [x] Use database capacity values for counts, labels, and available places.
 - [x] Confirm release rule: Sunday at 19:00 in `Europe/Berlin` opens the week starting eight days later. Example: 8 November 2026 opens 16–22 November.
-- [ ] Replace Rolling/14 generation with the agreed Sunday rule in admin increment 3. Preserve already-created games and bookings.
+- [x] Replace Rolling/14 generation with the agreed Sunday rule. Preserve already-created games and bookings.
 
 #### 2. Make the Mobile Slot List Easy to Scan
 - [x] Group slots by week and keep chronological order. Use clear date, time, and venue labels.
@@ -84,14 +84,14 @@ Checked member UI items were merged in PR #2. Admin experience is the next featu
 - Use local CSS instead of runtime Tailwind/CDN styling. HTMX remains pinned to its existing CDN version.
 - Browser tests use an isolated in-memory server on port 5051. They do not change the local preview or production database.
 - Verification passed: build, formatting, Clippy, 42 Rust tests, and 52 phone/desktop browser tests. Automated accessibility scans cover name suggestions, name forms, rosters, and confirmed booking state.
-- Admin editing milestones remain deferred. Existing admin endpoints remain available.
+- Historical note: admin editing was deferred in PR #2 and merged later in PR #3.
 
 ### PR Review Fixes
 - Keep every booking action, admin booking action, and refresh button disabled while the shared request runs. Keep new controls disabled after HTML replacement until the update settles. Announce request status to screen readers and restore controls after success or failure.
 - Submit the selected member ID from the name dropdown. Clear that ID when the search text changes. Reject unselected names and existing names submitted through the new-member form instead of choosing an account by case-insensitive lookup.
 - Regression tests reproduced both review findings before the fixes. Tests now cover signup and cancellation during a delayed refresh, controls on other cards, HTML replacement, failure recovery, selection changes, and legacy names such as `Ben` and `ben`.
 - Prevent actions under a stale displayed identity after a failed refresh. Each action sends the rendered member ID. The server rejects missing or mismatched IDs before making changes. Refresh and logout remain available.
-- Use private-field `BookingIdentity` and `AdminIdentity` extractors in `src/identity.rs`. Runtime validation happens once at the request boundary. Handler signatures then require a validated member identity and, for admin routes, the database admin flag. Do not replace unrelated database IDs with newtypes.
+- Historical note: PR #2 used the database admin flag in `AdminIdentity`. The admin-auth change replaces that check with a password-backed session.
 - Browser regression tests reproduce a failed focus refresh after another tab selects a different member. Verify that signup and cancellation change neither account, then verify recovery after a successful refresh. Server tests also cover admin actions, missing/invalid metadata, and logged-out cookies.
 
 ### Quiet Updates Without Layout Flicker
@@ -103,7 +103,7 @@ Checked member UI items were merged in PR #2. Admin experience is the next featu
 
 ### Before a Real User Trial
 - [ ] Verify persistent storage and restore a backup. Remove the unsafe live-file copy fallback from the backup process.
-- [ ] Confirm the no-auth access policy, especially admin identity selection.
+- [ ] Confirm the unauthenticated member-identity policy and configure a strong admin password.
 - [ ] Separate sample data from production data and verify the deployed app.
 - [ ] Add repeatable CI checks and define the required Rust toolchain. The README records the toolchain used for local verification, but does not pin one.
 
@@ -111,25 +111,26 @@ Checked member UI items were merged in PR #2. Admin experience is the next featu
 
 ## Milestone R1: Admin Mode and Slot Editing
 
-Implementation checklist: [`admin_experience.md`](admin_experience.md). Ship three increments: admin mode/rosters, individual game editing, then recurring defaults/Sunday release. Read remaining product decisions before implementing proposed behavior. Use small browser workflows and detailed Rust tests; do not add custom test-process orchestration or dirty-form/navigation tracking.
+Implementation merged in PR #3. See [`admin_experience.md`](admin_experience.md) for the original design and acceptance checklist. Unchecked detailed checks there still need verification.
 
 **Goal:** Keep the member layout and add frequent admin actions in a clearly distinct admin mode.
 
 ### Tasks
-- [ ] R1.1: Add an **admin mode toggle** (e.g., segmented control):
+- [x] R1.1: Add an **admin mode toggle** (e.g., segmented control):
   - User View (default): behaves like a normal member view
   - Admin View: enables admin editing controls
-- [ ] R1.2: Use distinct colors and a clear `Admin Mode` label without changing the familiar slot layout.
-- [ ] R1.3: Move a waitlisted member up or down. Player ordering has no special meaning.
-- [ ] R1.4: Remove a member from either list. Preserve automatic promotion when a player is removed.
-- [ ] R1.5: Add an existing member to the end of the selected player list or waitlist. Enforce capacity and prevent duplicate bookings.
-- [ ] R1.6: Edit a slot date, time, and location. Ask whether to keep or clear bookings only when bookings exist. Reject a stale save if a booking arrived after the form was loaded.
-- [ ] R1.7: Preserve slot and waitlist invariants, handle conflicting changes, and test all actions and failure paths.
-- [ ] R1.8: Add a separate `Edit recurring schedule` action at the top of admin mode. Keep it separate from `Edit this game` on each slot card.
-- [ ] R1.9: Let admins add or pause a recurring game and change its weekday, time, default location, and capacity. Apply changes to newly created games only. State clearly that existing games and bookings do not change.
-- [ ] R1.10: Replace Rolling/14 with one shared Sunday release at 19:00 Berlin time. Release the week starting eight days later, as in the 8 November → 16–22 November example. Only release time is editable; do not add policy variants, weekday selection, or week offsets. Show the next release and target week.
+- [x] R1.2: Use distinct colors and a clear `Admin Mode` label without changing the familiar slot layout.
+- [x] R1.3: Move a waitlisted member up or down. Player ordering has no special meaning.
+- [x] R1.4: Remove a member from either list. Preserve automatic promotion when a player is removed.
+- [x] R1.5: Add an existing member to the end of the selected player list or waitlist. Enforce capacity and prevent duplicate bookings.
+- [x] R1.6: Edit a slot date, time, and location. Ask whether to keep or clear bookings only when bookings exist. Reject a stale save if a booking arrived after the form was loaded.
+- [ ] R1.7: Verify slot and waitlist invariants, conflicting changes, and the planned action and failure-path tests.
+- [x] R1.8: Add a separate `Edit recurring schedule` action at the top of admin mode. Keep it separate from `Edit this game` on each slot card.
+- [x] R1.9: Let admins add or pause a recurring game and change its weekday, time, default location, and capacity. Apply changes to newly created games only. State clearly that existing games and bookings do not change.
+- [x] R1.10: Replace Rolling/14 with one shared Sunday release at 19:00 Berlin time. Release the week starting eight days later, as in the 8 November → 16–22 November example. Only release time is editable; do not add policy variants, weekday selection, or week offsets. Show the next release and target week.
 
 ### Behavioral Rules
+These are acceptance checks, not a list of unimplemented features.
 - [ ] Admins in **User View** should not see admin editing controls.
 - [ ] Roster actions use server-confirmed card updates. Editor saves return to the full overview or schedule page. Disable submit controls while saving; do not add navigation locks or unsaved-change warnings.
 - [ ] Clearing a player row should preserve queue fairness by applying existing promotion/shift logic.
@@ -137,7 +138,7 @@ Implementation checklist: [`admin_experience.md`](admin_experience.md). Ship thr
 - [ ] `Edit this game` changes one occurrence only. Mark changed occurrences clearly and preserve them during automatic renewal.
 - [ ] Recurring schedule edits affect newly created games only. Existing games need an explicit occurrence edit, including the choice to keep or clear bookings.
 - [ ] Keep the booking opening policy separate from recurring game defaults. Use one shared policy for all recurring games.
-- [ ] Admin identity selection remains unauthenticated. Admin mode is not a security boundary.
+- [ ] Verify password-backed admin access. Member name selection remains unauthenticated.
 
 ### Test Criteria
 - **Manual:**
@@ -214,4 +215,4 @@ Implementation checklist: [`admin_experience.md`](admin_experience.md). Ship thr
 
 - Keep the user path simple: members should still only select their identity and sign up/cancel their own booking.
 - Admin controls should be intentionally gated behind explicit mode switching.
-- Build R1 next. Reassess R3 batching and R4 audit features after members use the admin flow.
+- Reassess R3 batching and R4 audit features after members use the admin flow. Audit history remains out of scope for the current release.

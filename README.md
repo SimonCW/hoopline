@@ -11,6 +11,10 @@ It focuses on fair waitlist handling, clear accountability, and less weekly admi
 cargo run
 ```
 
+To try admin login locally, run `ADMIN_PASSWORD=admin cargo run`. Admin login
+is disabled when `ADMIN_PASSWORD` is unset or empty. Use a strong, unique
+password in deployment; do not use `admin` outside a local preview.
+
 Server listens on `0.0.0.0:5050`.
 
 Use a current stable Rust toolchain that supports edition 2024. The member UX changes were checked with Rust 1.99.1.
@@ -23,6 +27,8 @@ just preview
 
 This stops this checkout's dev server on port 5050 before starting the preview.
 Run `just stop-dev` to stop that server without starting a new one.
+The `just preview` and `just healthcheck` commands use `admin` as the local
+admin password unless `ADMIN_PASSWORD` is already set.
 
 ### Member booking behavior
 
@@ -43,7 +49,8 @@ Run `just stop-dev` to stop that server without starting a new one.
 
 ### Admin mode
 
-- Admin identities can switch between member view and admin mode. Name selection is not authentication; anyone who can select an admin name can use these controls.
+- Every member can open **Admin UI** and enter the shared admin password. A successful login adds `| Admin` to the selected name and opens admin mode. **Leave Admin** returns to member view and ends the admin session without changing bookings. The session also ends on logout or name change and expires after 12 hours.
+- The existing database admin flag does not grant access. Member name selection is still not authenticated. Admin actions require the separate admin session. Five failed password attempts temporarily block admin login for that member for 15 minutes. This limit does not prevent guessing across member names; use a strong password and external rate limiting.
 - Admins can add or remove members and reorder the waitlist. Removing a player promotes the first waiting member. Adding a player ahead of the waitlist is an explicit override. These roster controls also work for games that already started.
 - **Edit this game** changes one occurrence. When bookings exist, the admin must choose whether to keep or clear them. Clearing removes players and waitlist members without notifications.
 - **Edit recurring schedule** changes defaults for newly generated games only. Existing games and bookings stay unchanged. Pausing a schedule does not remove published games. Previously opened games remain available when the release time changes.
@@ -72,7 +79,7 @@ The app serves its CSS locally. Booking controls need JavaScript and the pinned 
 
 ### Identity checks for booking actions
 
-`src/identity.rs` provides private-field `BookingIdentity` and `AdminIdentity` extractors. Booking handlers require a validated `BookingIdentity`. Admin handlers also require the database admin flag through `AdminIdentity`.
+`src/identity.rs` provides private-field `BookingIdentity` and `AdminIdentity` extractors. Booking handlers require a validated `BookingIdentity`. Admin handlers also require a valid, member-bound admin session through `AdminIdentity`.
 
 HTMX sends the rendered member ID in `X-Hoopline-User`. The extractor checks this numeric ID against the current cookie and database record before the handler runs. Missing or mismatched IDs return HTTP 409 with a refresh instruction. This prevents stale-page mistakes; it is not authentication. Direct API clients must send the same header with booking actions.
 
@@ -81,6 +88,7 @@ HTMX sends the rendered member ID in `X-Hoopline-User`. The extractor checks thi
 For production, mount a Hostim volume at `/data` and store SQLite there:
 
 - `DATABASE_URL=sqlite:///data/hoopline.db`
+- Set `ADMIN_PASSWORD` to a strong secret and `COOKIE_SECURE=true` for HTTPS. Keep the password out of version control and container images.
 - Keep local `.db` files out of git (`*.db` is ignored)
 
 This repository's Docker image now defaults `DATABASE_URL` to `/data/hoopline.db`, so with a mounted volume data persists across deploys/restarts.

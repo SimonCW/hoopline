@@ -2,7 +2,7 @@
 
 This document records the original milestones. For current status and open work, see `refinements.md`. Checked deployment and backup tasks below record setup work, not verification of the current live deployment or a successful restore.
 
-For admin work, follow `admin_experience.md` in three increments. Add schema only when its feature needs it. The agreed release is Sunday at 19:00 Berlin time for the week starting eight days later (8 November 2026 → 16–22 November). The current rolling window stays until the third increment replaces it. Do not build general booking-policy variants, custom browser-process orchestration, navigation locks, or unsaved-change tracking.
+PR #3 merged the admin experience and replaced the rolling window with the Sunday release. The initial release time is 19:00 Berlin time for the week starting eight days later (8 November 2026 → 16–22 November). See `admin_experience.md` for the original design and outstanding verification. Do not build general booking-policy variants, custom browser-process orchestration, navigation locks, or unsaved-change tracking.
 
 ## Philosophy
 

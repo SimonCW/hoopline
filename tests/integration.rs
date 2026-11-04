@@ -16,6 +16,10 @@ async fn test_pool() -> sqlx::SqlitePool {
     // Fixed future dates keep booking tests independent of the current weekday.
     sqlx::query("UPDATE slots SET datetime = CASE id WHEN 1 THEN '2099-01-05T19:00:00Z' WHEN 2 THEN '2099-01-06T19:00:00Z' ELSE '2099-01-08T19:00:00Z' END")
         .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO admin_sessions VALUES ('test-session', 1, unixepoch() + 3600)")
+        .execute(&pool)
+        .await
+        .unwrap();
     pool
 }
 
@@ -79,8 +83,16 @@ async fn admin_mode_is_explicit_and_requires_admin_identity() {
     let pool = test_pool().await;
     for (cookie, uri, expected) in [
         ("user_id=1", "/slots", false),
-        ("user_id=1", "/slots?mode=admin", true),
-        ("user_id=1", "/slots/fragment?mode=admin", true),
+        (
+            "user_id=1; admin_session=test-session",
+            "/slots?mode=admin",
+            true,
+        ),
+        (
+            "user_id=1; admin_session=test-session",
+            "/slots/fragment?mode=admin",
+            true,
+        ),
         ("user_id=2", "/slots?mode=admin", false),
     ] {
         let response = app_with_pool(pool.clone())
@@ -99,6 +111,110 @@ async fn admin_mode_is_explicit_and_requires_admin_identity() {
 }
 
 #[tokio::test]
+async fn admin_session_is_bound_to_member_and_leave_revokes_it() {
+    let pool = test_pool().await;
+    let app = app_with_pool(pool.clone());
+    let token = "admin_session=test-session";
+    for cookie in [format!("user_id=2; {token}"), "user_id=1".into()] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/admin/schedule")
+                    .header(header::COOKIE, cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+    let cookie = format!("user_id=1; {token}");
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/logout")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert!(
+        response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .any(|v| v.to_str().unwrap().contains("Max-Age=0"))
+    );
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/schedule")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn expired_admin_session_cannot_access_admin_pages() {
+    let pool = test_pool().await;
+    sqlx::query("UPDATE admin_sessions SET expires_at = unixepoch() - 1")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let response = app_with_pool(pool)
+        .oneshot(
+            Request::builder()
+                .uri("/admin/schedule")
+                .header(header::COOKIE, "user_id=1; admin_session=test-session")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn selecting_another_member_revokes_admin_session() {
+    let pool = test_pool().await;
+    let app = app_with_pool(pool.clone());
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/users/select")
+                .header(header::COOKIE, "user_id=1; admin_session=test-session")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("selected_user_id=2"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/schedule")
+                .header(header::COOKIE, "user_id=1; admin_session=test-session")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn admin_can_append_members_and_reorder_waitlist_with_revision_checks() {
     let pool = test_pool().await;
     let app = app_with_pool(pool.clone());
@@ -109,7 +225,11 @@ async fn admin_can_append_members_and_reorder_waitlist_with_revision_checks() {
             .header(header::COOKIE, cookie)
             .header(
                 "x-hoopline-user",
-                if cookie == "user_id=1" { "1" } else { "2" },
+                if cookie.starts_with("user_id=1") {
+                    "1"
+                } else {
+                    "2"
+                },
             )
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
             .body(Body::from(body.to_string()))
@@ -124,19 +244,31 @@ async fn admin_can_append_members_and_reorder_waitlist_with_revision_checks() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     let response = app
         .clone()
-        .oneshot(post(add, "user_id=7&revision=0&list=waitlist", "user_id=1"))
+        .oneshot(post(
+            add,
+            "user_id=7&revision=0&list=waitlist",
+            "user_id=1; admin_session=test-session",
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let response = app
         .clone()
-        .oneshot(post(add, "user_id=8&revision=0&list=waitlist", "user_id=1"))
+        .oneshot(post(
+            add,
+            "user_id=8&revision=0&list=waitlist",
+            "user_id=1; admin_session=test-session",
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
     let response = app
         .clone()
-        .oneshot(post(add, "user_id=8&revision=1&list=waitlist", "user_id=1"))
+        .oneshot(post(
+            add,
+            "user_id=8&revision=1&list=waitlist",
+            "user_id=1; admin_session=test-session",
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -145,7 +277,7 @@ async fn admin_can_append_members_and_reorder_waitlist_with_revision_checks() {
         .oneshot(post(
             "/admin/slots/1/move/8",
             "revision=2&direction=up",
-            "user_id=1",
+            "user_id=1; admin_session=test-session",
         ))
         .await
         .unwrap();
@@ -157,7 +289,7 @@ async fn admin_can_append_members_and_reorder_waitlist_with_revision_checks() {
         .oneshot(post(
             "/admin/slots/1/move/8",
             "revision=3&direction=up",
-            "user_id=1",
+            "user_id=1; admin_session=test-session",
         ))
         .await
         .unwrap();
@@ -181,7 +313,7 @@ async fn stale_admin_remove_and_promote_leave_bookings_unchanged() {
                 Request::builder()
                     .method("POST")
                     .uri(uri)
-                    .header(header::COOKIE, "user_id=1")
+                    .header(header::COOKIE, "user_id=1; admin_session=test-session")
                     .header("x-hoopline-user", "1")
                     .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                     .body(Body::from("revision=0"))
@@ -218,7 +350,7 @@ async fn admin_roster_actions_work_after_a_game_starts() {
                 Request::builder()
                     .method("POST")
                     .uri(uri)
-                    .header(header::COOKIE, "user_id=1")
+                    .header(header::COOKIE, "user_id=1; admin_session=test-session")
                     .header("x-hoopline-user", "1")
                     .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                     .body(Body::from(body))
@@ -243,7 +375,7 @@ async fn admin_game_edit_requires_booking_choice_and_rejects_stale_forms() {
         Request::builder()
             .method("POST")
             .uri("/admin/slots/1/edit")
-            .header(header::COOKIE, "user_id=1")
+            .header(header::COOKIE, "user_id=1; admin_session=test-session")
             .header("x-hoopline-user", "1")
             .header("hx-request", "true")
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
@@ -294,7 +426,7 @@ async fn game_edit_clear_and_noop_are_safe() {
         Request::builder()
             .method("POST")
             .uri("/admin/slots/1/edit")
-            .header(header::COOKIE, "user_id=1")
+            .header(header::COOKIE, "user_id=1; admin_session=test-session")
             .header("x-hoopline-user", "1")
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
             .body(Body::from(body))
@@ -311,7 +443,7 @@ async fn game_edit_clear_and_noop_are_safe() {
             Request::builder()
                 .method("POST")
                 .uri("/admin/slots/1/edit")
-                .header(header::COOKIE, "user_id=1")
+                .header(header::COOKIE, "user_id=1; admin_session=test-session")
                 .header("x-hoopline-user", "1")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::from(noop))
@@ -372,7 +504,11 @@ async fn schedule_changes_require_admin_and_preserve_existing_games() {
     );
     assert_eq!(
         app.clone()
-            .oneshot(request("user_id=1", "2", fields))
+            .oneshot(request(
+                "user_id=1; admin_session=test-session",
+                "2",
+                fields
+            ))
             .await
             .unwrap()
             .status(),
@@ -380,17 +516,25 @@ async fn schedule_changes_require_admin_and_preserve_existing_games() {
     );
     assert_eq!(
         app.clone()
-            .oneshot(request("user_id=1", "1", fields))
+            .oneshot(request(
+                "user_id=1; admin_session=test-session",
+                "1",
+                fields
+            ))
             .await
             .unwrap()
             .status(),
         StatusCode::SEE_OTHER
     );
     assert_eq!(
-        app.oneshot(request("user_id=1", "1", fields))
-            .await
-            .unwrap()
-            .status(),
+        app.oneshot(request(
+            "user_id=1; admin_session=test-session",
+            "1",
+            fields
+        ))
+        .await
+        .unwrap()
+        .status(),
         StatusCode::CONFLICT
     );
     let game = db::find_slot(&pool, 1).await.unwrap().unwrap();
@@ -440,7 +584,7 @@ async fn moved_generated_game_is_not_recreated_by_renewal() {
             Request::builder()
                 .method("POST")
                 .uri(format!("/admin/slots/{id}/edit"))
-                .header(header::COOKIE, "user_id=1")
+                .header(header::COOKIE, "user_id=1; admin_session=test-session")
                 .header("x-hoopline-user", "1")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::from(body))
@@ -470,7 +614,7 @@ async fn conflicting_game_edit_keeps_all_bookings_and_original_location() {
             Request::builder()
                 .method("POST")
                 .uri("/admin/slots/1/edit")
-                .header(header::COOKIE, "user_id=1")
+                .header(header::COOKIE, "user_id=1; admin_session=test-session")
                 .header("x-hoopline-user", "1")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::from(body))
@@ -498,7 +642,7 @@ async fn release_time_rejects_stale_and_ambiguous_settings() {
         Request::builder()
             .method("POST")
             .uri("/admin/release-time")
-            .header(header::COOKIE, "user_id=1")
+            .header(header::COOKIE, "user_id=1; admin_session=test-session")
             .header("x-hoopline-user", "1")
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
             .body(Body::from(body))
@@ -558,7 +702,7 @@ async fn manual_generation_reports_conflicting_linked_game() {
             Request::builder()
                 .method("POST")
                 .uri("/admin/slots/generate")
-                .header(header::COOKIE, "user_id=1")
+                .header(header::COOKIE, "user_id=1; admin_session=test-session")
                 .header("x-hoopline-user", "1")
                 .body(Body::empty())
                 .unwrap(),
@@ -754,7 +898,7 @@ async fn get_users_shows_admin_tools_for_admin_cookie() {
         .oneshot(
             Request::builder()
                 .uri("/users")
-                .header(header::COOKIE, "user_id=1")
+                .header(header::COOKIE, "user_id=1; admin_session=test-session")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -929,7 +1073,7 @@ async fn post_slots_signup_rejects_duplicate_user() {
             Request::builder()
                 .method("POST")
                 .uri("/slots/1/signup")
-                .header(header::COOKIE, "user_id=1")
+                .header(header::COOKIE, "user_id=1; admin_session=test-session")
                 .header("x-hoopline-user", "1")
                 .body(Body::empty())
                 .unwrap(),
@@ -1087,7 +1231,7 @@ async fn post_admin_remove_triggers_waitlist_promotion() {
             Request::builder()
                 .method("POST")
                 .uri("/admin/slots/1/remove/2")
-                .header(header::COOKIE, "user_id=1")
+                .header(header::COOKIE, "user_id=1; admin_session=test-session")
                 .header("x-hoopline-user", "1")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::from("revision=0"))
@@ -1139,7 +1283,7 @@ async fn post_admin_promote_moves_target_from_waitlist_to_players() {
             Request::builder()
                 .method("POST")
                 .uri("/admin/slots/3/promote/4")
-                .header(header::COOKIE, "user_id=1")
+                .header(header::COOKIE, "user_id=1; admin_session=test-session")
                 .header("x-hoopline-user", "1")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::from("revision=0"))
@@ -1208,7 +1352,7 @@ async fn post_admin_generate_slots_creates_future_slots() {
             Request::builder()
                 .method("POST")
                 .uri("/admin/slots/generate")
-                .header(header::COOKIE, "user_id=1")
+                .header(header::COOKIE, "user_id=1; admin_session=test-session")
                 .header("x-hoopline-user", "1")
                 .body(Body::empty())
                 .unwrap(),
@@ -1772,9 +1916,21 @@ async fn stale_displayed_identity_cannot_change_bookings_or_generate_slots() {
     for (uri, cookie, displayed_id) in [
         ("/slots/3/signup", "user_id=6", "7"),
         ("/slots/1/cancel", "user_id=2", "1"),
-        ("/admin/slots/1/remove/2", "user_id=1", "2"),
-        ("/admin/slots/3/promote/4", "user_id=1", "2"),
-        ("/admin/slots/generate", "user_id=1", "2"),
+        (
+            "/admin/slots/1/remove/2",
+            "user_id=1; admin_session=test-session",
+            "2",
+        ),
+        (
+            "/admin/slots/3/promote/4",
+            "user_id=1; admin_session=test-session",
+            "2",
+        ),
+        (
+            "/admin/slots/generate",
+            "user_id=1; admin_session=test-session",
+            "2",
+        ),
     ] {
         let response = app
             .clone()
@@ -1813,9 +1969,18 @@ async fn missing_or_invalid_displayed_identity_cannot_modify_bookings() {
         for (uri, cookie) in [
             ("/slots/3/signup", "user_id=6"),
             ("/slots/3/cancel", "user_id=6"),
-            ("/admin/slots/1/remove/2", "user_id=1"),
-            ("/admin/slots/3/promote/4", "user_id=1"),
-            ("/admin/slots/generate", "user_id=1"),
+            (
+                "/admin/slots/1/remove/2",
+                "user_id=1; admin_session=test-session",
+            ),
+            (
+                "/admin/slots/3/promote/4",
+                "user_id=1; admin_session=test-session",
+            ),
+            (
+                "/admin/slots/generate",
+                "user_id=1; admin_session=test-session",
+            ),
         ] {
             let mut request = Request::builder()
                 .method("POST")

@@ -12,7 +12,7 @@ use crate::{
         create_user, find_slot, find_user_by_id, find_user_by_name, list_slots, list_users,
         promote_waitlist_checked, signup_for_slot,
     },
-    identity::{AdminIdentity, BookingIdentity, current_user_from_headers},
+    identity::{AdminIdentity, BookingIdentity, cookie_value, current_user_from_headers},
     models::{Slot, SlotWeek, UserIdentity, group_slots},
 };
 use askama::Template;
@@ -29,6 +29,7 @@ use error::AppError;
 use serde::Deserialize;
 use sqlx::SqlitePool;
 use std::{path::Path as FsPath, time::Duration};
+use subtle::ConstantTimeEq;
 use tower_http::trace::TraceLayer;
 
 #[derive(Template)]
@@ -117,7 +118,8 @@ struct ViewQuery {
 
 impl ViewQuery {
     fn admin_mode(&self, is_admin: bool) -> bool {
-        is_admin && self.mode.as_deref() == Some("admin")
+        let _ = &self.mode;
+        is_admin
     }
 }
 
@@ -134,6 +136,21 @@ struct UserSelectorTemplate {
 struct UserSelectionForm {
     selected_user_id: Option<i64>,
     new_user_name: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "admin_login.html")]
+struct AdminLoginTemplate {
+    title: String,
+    error: String,
+    user_id: i64,
+    user_name: String,
+}
+
+#[derive(Deserialize)]
+struct AdminLoginForm {
+    password: String,
+    user_id: i64,
 }
 
 /// Builds the application router with a migrated `SQLite` connection pool.
@@ -180,6 +197,8 @@ pub fn app_with_pool(pool: SqlitePool) -> Router {
         .route("/", get(index))
         .route("/slots", get(index))
         .route("/slots/fragment", get(slots_fragment))
+        .route("/admin/login", get(admin_login_page).post(admin_login))
+        .route("/admin/logout", post(admin_logout))
         .route("/slots/{slot_id}/signup", post(signup_slot))
         .route("/slots/{slot_id}/cancel", post(cancel_slot))
         .route("/admin/slots/{slot_id}/add", post(admin_add_slot_user))
@@ -605,8 +624,16 @@ async fn render_user_selector(
             Vec::new()
         },
         selected_user_id: user.map(|user| user.id),
-        current_user_label: user
-            .map_or_else(|| "Select your name".into(), |user| user.name.clone()),
+        current_user_label: user.map_or_else(
+            || "Select your name".into(),
+            |user| {
+                if user.is_admin {
+                    format!("{} | Admin", user.name)
+                } else {
+                    user.name.clone()
+                }
+            },
+        ),
     };
     Ok(template.render()?)
 }
@@ -639,11 +666,15 @@ async fn select_user(
         ));
     };
 
+    revoke_admin_session(&pool, &headers).await?;
     let mut response = identity_redirect(&headers, "/slots");
     response.headers_mut().insert(
         header::SET_COOKIE,
         user_cookie_header_value(selected_user.id)?,
     );
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, admin_cookie("", 0)?);
     Ok(response)
 }
 
@@ -665,12 +696,140 @@ fn identity_redirect(headers: &HeaderMap, destination: &'static str) -> Response
     }
 }
 
-async fn logout(headers: HeaderMap) -> Result<Response, AppError> {
+async fn logout(State(pool): State<SqlitePool>, headers: HeaderMap) -> Result<Response, AppError> {
+    revoke_admin_session(&pool, &headers).await?;
     let mut response = identity_redirect(&headers, "/");
     response
         .headers_mut()
         .insert(header::SET_COOKIE, identity_cookie("", 0)?);
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, admin_cookie("", 0)?);
     Ok(response)
+}
+
+async fn admin_login_page(
+    State(pool): State<SqlitePool>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
+    let user = current_user_from_headers(&pool, &headers)
+        .await?
+        .ok_or(AppError::IdentityChanged)?;
+    admin_login_form(&user, "")
+}
+
+fn admin_login_form(user: &UserIdentity, error: &str) -> Result<Html<String>, AppError> {
+    Ok(Html(
+        AdminLoginTemplate {
+            title: "Admin login".into(),
+            error: error.into(),
+            user_id: user.id,
+            user_name: user.name.clone(),
+        }
+        .render()?,
+    ))
+}
+
+async fn admin_login(
+    State(pool): State<SqlitePool>,
+    headers: HeaderMap,
+    Form(form): Form<AdminLoginForm>,
+) -> Result<Response, AppError> {
+    let user = current_user_from_headers(&pool, &headers)
+        .await?
+        .ok_or(AppError::IdentityChanged)?;
+    if form.user_id != user.id {
+        return Err(AppError::IdentityChanged);
+    }
+    let password = std::env::var("ADMIN_PASSWORD")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| AppError::Forbidden("Admin login is not configured.".into()))?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    sqlx::query("DELETE FROM admin_login_failures WHERE attempted_at <= unixepoch() - 900")
+        .execute(&mut *tx)
+        .await?;
+    let failures: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM admin_login_failures WHERE user_id = ?")
+            .bind(user.id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if failures >= 5 {
+        tx.commit().await?;
+        return Ok(admin_login_form(
+            &user,
+            "Too many attempts for this member. Try again in 15 minutes.",
+        )?
+        .into_response());
+    }
+    if !bool::from(password.as_bytes().ct_eq(form.password.as_bytes())) {
+        sqlx::query("INSERT INTO admin_login_failures VALUES (?, unixepoch())")
+            .bind(user.id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        return Ok(admin_login_form(&user, "Incorrect password.")?.into_response());
+    }
+    sqlx::query("DELETE FROM admin_login_failures WHERE user_id = ?")
+        .bind(user.id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM admin_sessions WHERE expires_at <= unixepoch()")
+        .execute(&mut *tx)
+        .await?;
+    if let Some(token) = cookie_value(&headers, "admin_session") {
+        sqlx::query("DELETE FROM admin_sessions WHERE token = ?")
+            .bind(token)
+            .execute(&mut *tx)
+            .await?;
+    }
+    let token: String = sqlx::query_scalar("SELECT lower(hex(randomblob(32)))")
+        .fetch_one(&mut *tx)
+        .await?;
+    sqlx::query("INSERT INTO admin_sessions VALUES (?, ?, unixepoch() + 43200)")
+        .bind(&token)
+        .bind(user.id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    let mut response = identity_redirect(&headers, "/slots?mode=admin");
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, admin_cookie(&token, 43_200)?);
+    Ok(response)
+}
+
+async fn revoke_admin_session(pool: &SqlitePool, headers: &HeaderMap) -> Result<(), AppError> {
+    if let Some(token) = cookie_value(headers, "admin_session") {
+        sqlx::query("DELETE FROM admin_sessions WHERE token = ?")
+            .bind(token)
+            .execute(pool)
+            .await?;
+    }
+    Ok(())
+}
+
+async fn admin_logout(
+    State(pool): State<SqlitePool>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    revoke_admin_session(&pool, &headers).await?;
+    let mut response = identity_redirect(&headers, "/slots");
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, admin_cookie("", 0)?);
+    Ok(response)
+}
+
+fn admin_cookie(value: &str, max_age: u32) -> Result<HeaderValue, AppError> {
+    let secure = if std::env::var("COOKIE_SECURE").as_deref() == Ok("true") {
+        "; Secure"
+    } else {
+        ""
+    };
+    Ok(HeaderValue::from_str(&format!(
+        "admin_session={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax{secure}"
+    ))?)
 }
 
 async fn robots() -> &'static str {

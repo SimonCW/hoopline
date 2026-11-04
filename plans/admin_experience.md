@@ -1,6 +1,8 @@
 # Admin Experience: Implementation Plan
 
-Status: implementation in progress on `finish-admin-experience`, 2026-11-04. Admin rosters, single-game editing, recurring defaults, and Sunday release have been implemented. Verify and review before deployment. Unchecked items below are not claims of completed test coverage.
+Status: [PR #3](https://github.com/SimonCW/hoopline/pull/3) merged on 2026-11-04. It implements admin mode and rosters, single-game editing, recurring defaults, and Sunday release. The PR has no verification summary. Verify the merged code before deployment. The checklist below is the original implementation and acceptance plan; unchecked items do not mean the feature is absent, and they do not establish test coverage.
+
+The later admin-auth work supersedes the original database-role and no-auth rules in this historical plan. Admin access now requires a separate password-backed session.
 
 ## 1. Outcome and Scope
 
@@ -25,7 +27,7 @@ These defaults make the work implementable. They are proposals, not additional c
 
 ### Remaining Decisions
 
-The user approved the simpler three-increment delivery, browser tests, editor behavior, and delayed schema changes. Before roster implementation, confirm direct player additions ahead of waiters, waitlist additions when player space exists, and the proposed started-slot restriction. Confirm field limits and new/pause controls before the schedule editor. The Sunday release rule and initial time (19:00 Berlin) are settled. Do not build a policy selector or configurable weekday/week offset.
+The three increments are merged. The implemented roster rules allow direct additions to either list and admin roster changes after a game starts. The schedule editor supports new and paused schedules. The Sunday release rule and initial time (19:00 Berlin) are settled. Do not build a policy selector or configurable weekday/week offset.
 
 ### Modes and Screens
 
@@ -87,7 +89,9 @@ There is one rule, not a choice of policies:
 - Keep the one-minute renewal loop and startup catch-up. New games appear on the next run, up to one minute after release. The explicit Generate action respects the same cutoff.
 - Increments 1 and 2 keep the current Rolling/14 implementation. Increment 3 replaces it with this Sunday rule; do not maintain both modes afterward.
 
-## 3. Current Code Map
+## 3. Original Code Map
+
+This map describes the code before implementation. It is not a current file inventory.
 
 - `src/lib.rs`: all routes and handlers; Askama view structs; one-minute renewal setup.
 - `src/identity.rs`: `BookingIdentity` and `AdminIdentity`; compares `X-Hoopline-User` with the cookie and database.
@@ -177,7 +181,7 @@ Use these routes unless an existing repository convention requires a smaller equ
 
 ## 6. Implementation Units
 
-Complete one unit at a time. Start each unit by reading this plan and the touched code. Add failing tests before changes. Do not implement later units to fix a failing earlier unit.
+The units below record the original delivery plan. Review unchecked test and acceptance items against the merged code before marking them complete.
 
 Ship three independent increments:
 1. **Admin mode and roster controls:** B, then roster-only A4 and C. Add the slot revision column and model field here. This does not depend on schedule changes.
@@ -288,4 +292,4 @@ A review subagent challenged the first draft. This revision addresses the main f
 - The user settled the release rule: Sunday at 19:00 Berlin time opens the week starting eight days later. General policy variants were removed.
 - Work now ships in three increments. Schema changes follow their feature. Browser tests use a small isolated suite without custom process orchestration; Rust tests cover detailed cases.
 
-This review checked the plan against the current code. It did not run application tests or approve the proposed product choices.
+This historical review checked the plan against the code at the time. It did not run application tests.

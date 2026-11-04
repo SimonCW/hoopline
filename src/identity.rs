@@ -1,5 +1,5 @@
 //! Validated identities for page-bound booking actions.
-//! These checks prevent stale-page actions. They do not authenticate members.
+//! Member selection is not authentication. Admin access requires a session.
 
 use axum::{
     extract::FromRequestParts,
@@ -48,7 +48,7 @@ impl FromRequestParts<SqlitePool> for BookingIdentity {
     }
 }
 
-/// Adds a database admin-role check to a validated booking identity.
+/// Adds an admin session check to a validated booking identity.
 #[derive(Clone, Debug)]
 pub(crate) struct AdminIdentity(BookingIdentity);
 
@@ -78,18 +78,35 @@ pub(crate) async fn current_user_from_headers(
     headers: &HeaderMap,
 ) -> Result<Option<UserIdentity>, AppError> {
     if let Some(user_id) = user_id_from_cookie(headers) {
-        return find_user_by_id(pool, user_id).await.map_err(AppError::from);
+        let mut user = find_user_by_id(pool, user_id).await?;
+        if let Some(ref mut user) = user {
+            user.is_admin = if let Some(token) = cookie_value(headers, "admin_session") {
+                sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM admin_sessions WHERE token = ? AND user_id = ? AND expires_at > unixepoch())")
+                    .bind(token)
+                    .bind(user.id)
+                    .fetch_one(pool)
+                    .await? != 0
+            } else {
+                false
+            };
+        }
+        return Ok(user);
     }
     Ok(None)
 }
 
 fn user_id_from_cookie(headers: &HeaderMap) -> Option<i64> {
-    let raw_cookie = headers.get(header::COOKIE)?.to_str().ok()?;
-    raw_cookie
+    cookie_value(headers, "user_id")?.parse().ok()
+}
+
+pub(crate) fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers
+        .get(header::COOKIE)?
+        .to_str()
+        .ok()?
         .split(';')
         .find_map(|part| {
-            let (name, value) = part.trim().split_once('=')?;
-            (name == "user_id").then_some(value)
+            let (key, value) = part.trim().split_once('=')?;
+            (key == name).then_some(value)
         })
-        .and_then(|value| value.parse::<i64>().ok())
 }
