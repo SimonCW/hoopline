@@ -1,0 +1,12 @@
+{
+  "name": "hoopline-browser-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:ui": "playwright test"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.11.0",
+    "@playwright/test": "1.64.1"
+  }
+}

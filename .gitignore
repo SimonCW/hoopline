@@ -1,4 +1,8 @@
 /tmp
+/node_modules/
+/test-results/
+/playwright-report/
+/.playwright-mcp/
 
 # SQLite database (local dev only)
 *.db

@@ -1,6 +1,7 @@
-use std::str::FromStr;
+use std::{str::FromStr, time::Duration};
 
-use chrono::{DateTime, Datelike, Days, Utc};
+use chrono::{DateTime, Datelike, Days, NaiveTime, SecondsFormat, TimeZone, Utc};
+use chrono_tz::Europe::Berlin;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
 
@@ -13,6 +14,7 @@ pub enum SignupOutcome {
     AlreadySignedUp,
     Full,
     SlotNotFound,
+    Started,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -33,7 +35,7 @@ pub enum PromoteOutcome {
 #[derive(Clone, Debug)]
 struct SlotSchedule {
     weekday: i64,
-    time_utc: String,
+    time_local: String,
     venue: String,
     max_players: i64,
     max_waitlist: i64,
@@ -52,7 +54,9 @@ pub async fn init_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
         5
     };
 
-    let mut connect_options = SqliteConnectOptions::from_str(database_url)?;
+    let mut connect_options = SqliteConnectOptions::from_str(database_url)?
+        .foreign_keys(true)
+        .busy_timeout(Duration::from_secs(5));
     if database_url != "sqlite::memory:" {
         connect_options = connect_options.create_if_missing(true);
     }
@@ -84,9 +88,9 @@ pub async fn create_upcoming_slots(
         return Ok(0);
     }
 
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let mut created_count = 0_i64;
-    let start_date = now.date_naive();
+    let start_date = now.with_timezone(&Berlin).date_naive();
 
     for day_offset in 0_u64..14 {
         let Some(target_date) = start_date.checked_add_days(Days::new(day_offset)) else {
@@ -97,14 +101,43 @@ pub async fn create_upcoming_slots(
             if schedule.weekday != target_weekday {
                 continue;
             }
-            let datetime = format!("{target_date}T{}:00Z", schedule.time_utc);
+            let time = NaiveTime::parse_from_str(&schedule.time_local, "%H:%M")
+                .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
+            let local = Berlin
+                .from_local_datetime(&target_date.and_time(time))
+                .single()
+                .ok_or_else(|| {
+                    sqlx::Error::Protocol("ambiguous or missing local schedule time".into())
+                })?;
+            if local <= now {
+                continue;
+            }
+            let datetime = local
+                .with_timezone(&Utc)
+                .to_rfc3339_opts(SecondsFormat::Secs, true);
+            // Keep existing booked slots, including slots created under the old UTC schedule.
+            let day_start = Berlin
+                .from_local_datetime(&target_date.and_time(NaiveTime::MIN))
+                .single()
+                .ok_or_else(|| sqlx::Error::Protocol("invalid local date".into()))?;
+            let day_end = Berlin
+                .from_local_datetime(&(target_date + Days::new(1)).and_time(NaiveTime::MIN))
+                .single()
+                .ok_or_else(|| sqlx::Error::Protocol("invalid local date".into()))?;
             let result = sqlx::query(
-                "INSERT OR IGNORE INTO slots (datetime, venue, max_players, max_waitlist) VALUES (?, ?, ?, ?)",
+                "INSERT INTO slots (datetime, venue, max_players, max_waitlist)
+                 SELECT ?, ?, ?, ? WHERE NOT EXISTS (
+                     SELECT 1 FROM slots WHERE venue = ?
+                     AND julianday(datetime) >= julianday(?) AND julianday(datetime) < julianday(?)
+                 ) ON CONFLICT(datetime, venue) DO NOTHING",
             )
             .bind(datetime)
             .bind(&schedule.venue)
             .bind(schedule.max_players)
             .bind(schedule.max_waitlist)
+            .bind(&schedule.venue)
+            .bind(day_start.to_rfc3339())
+            .bind(day_end.to_rfc3339())
             .execute(&mut *tx)
             .await?;
             created_count += i64::try_from(result.rows_affected()).unwrap_or_default();
@@ -121,21 +154,36 @@ pub async fn create_upcoming_slots(
 ///
 /// Returns an error when the slot or booking query fails, or row decoding fails.
 pub async fn list_slots(pool: &SqlitePool) -> Result<Vec<Slot>, sqlx::Error> {
+    list_slots_at(pool, Utc::now()).await
+}
+
+/// Returns future slots at the supplied instant.
+///
+/// # Errors
+/// Returns an error when querying or decoding slots fails.
+pub async fn list_slots_at(
+    pool: &SqlitePool,
+    now: DateTime<Utc>,
+) -> Result<Vec<Slot>, sqlx::Error> {
     let rows = sqlx::query(
         r"
         SELECT
             s.id,
             s.datetime,
             s.venue,
+            s.max_players,
+            s.max_waitlist,
             b.is_waitlist,
             b.user_id,
             u.name
         FROM slots s
         LEFT JOIN bookings b ON b.slot_id = s.id
         LEFT JOIN users u ON u.id = b.user_id
-        ORDER BY s.datetime, s.id, b.is_waitlist, b.position
+        WHERE julianday(s.datetime) > julianday(?)
+        ORDER BY julianday(s.datetime), s.id, b.is_waitlist, b.position
         ",
     )
+    .bind(now.to_rfc3339())
     .fetch_all(pool)
     .await?;
 
@@ -154,6 +202,8 @@ pub async fn find_slot(pool: &SqlitePool, slot_id: i64) -> Result<Option<Slot>, 
             s.id,
             s.datetime,
             s.venue,
+            s.max_players,
+            s.max_waitlist,
             b.is_waitlist,
             b.user_id,
             u.name
@@ -182,14 +232,18 @@ pub async fn signup_for_slot(
     slot_id: i64,
     user_id: i64,
 ) -> Result<SignupOutcome, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-    let slot_limits = sqlx::query("SELECT max_players, max_waitlist FROM slots WHERE id = ?")
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let slot_limits = sqlx::query("SELECT max_players, max_waitlist, julianday(datetime) <= julianday(?) AS started FROM slots WHERE id = ?")
+        .bind(Utc::now().to_rfc3339())
         .bind(slot_id)
         .fetch_optional(&mut *tx)
         .await?;
     let Some(slot_limits) = slot_limits else {
         return Ok(SignupOutcome::SlotNotFound);
     };
+    if slot_limits.try_get::<i64, _>("started")? != 0 {
+        return Ok(SignupOutcome::Started);
+    }
     let max_players: i64 = slot_limits.try_get("max_players")?;
     let max_waitlist: i64 = slot_limits.try_get("max_waitlist")?;
 
@@ -252,7 +306,7 @@ pub async fn cancel_booking_for_slot(
     slot_id: i64,
     user_id: i64,
 ) -> Result<CancelOutcome, sqlx::Error> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let slot_exists: Option<i64> = sqlx::query_scalar("SELECT id FROM slots WHERE id = ?")
         .bind(slot_id)
         .fetch_optional(&mut *tx)
@@ -361,7 +415,7 @@ pub async fn promote_waitlist_user(
     slot_id: i64,
     user_id: i64,
 ) -> Result<PromoteOutcome, sqlx::Error> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let slot = sqlx::query("SELECT max_players FROM slots WHERE id = ?")
         .bind(slot_id)
         .fetch_optional(&mut *tx)
@@ -428,7 +482,7 @@ pub async fn promote_waitlist_user(
 
 async fn list_active_slot_schedules(pool: &SqlitePool) -> Result<Vec<SlotSchedule>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT weekday, time_utc, venue, max_players, max_waitlist
+        "SELECT weekday, time_local, venue, max_players, max_waitlist
          FROM slot_schedules
          WHERE is_active = 1",
     )
@@ -439,7 +493,7 @@ async fn list_active_slot_schedules(pool: &SqlitePool) -> Result<Vec<SlotSchedul
         .map(|row| {
             Ok(SlotSchedule {
                 weekday: row.try_get("weekday")?,
-                time_utc: row.try_get("time_utc")?,
+                time_local: row.try_get("time_local")?,
                 venue: row.try_get("venue")?,
                 max_players: row.try_get("max_players")?,
                 max_waitlist: row.try_get("max_waitlist")?,
@@ -475,6 +529,10 @@ fn slots_from_rows(rows: Vec<SqliteRow>) -> Result<Vec<Slot>, sqlx::Error> {
                 id: slot_id,
                 datetime: row.get("datetime"),
                 venue: row.get("venue"),
+                max_players: usize::try_from(row.try_get::<i64, _>("max_players")?)
+                    .map_err(|error| sqlx::Error::Decode(Box::new(error)))?,
+                max_waitlist: usize::try_from(row.try_get::<i64, _>("max_waitlist")?)
+                    .map_err(|error| sqlx::Error::Decode(Box::new(error)))?,
                 players: Vec::new(),
                 player_user_ids: Vec::new(),
                 waitlist: Vec::new(),
@@ -559,10 +617,12 @@ pub async fn find_user_by_name(
     pool: &SqlitePool,
     name: &str,
 ) -> Result<Option<UserIdentity>, sqlx::Error> {
-    let row = sqlx::query("SELECT id, name, is_admin FROM users WHERE name = ?")
-        .bind(name)
-        .fetch_optional(pool)
-        .await?;
+    let row = sqlx::query(
+        "SELECT id, name, is_admin FROM users WHERE name = ? COLLATE NOCASE ORDER BY id LIMIT 1",
+    )
+    .bind(name)
+    .fetch_optional(pool)
+    .await?;
 
     row.map(|record| {
         Ok(UserIdentity {
@@ -580,7 +640,7 @@ pub async fn find_user_by_name(
 ///
 /// Returns an error when insertion fails.
 pub async fn create_user(pool: &SqlitePool, name: &str) -> Result<UserIdentity, sqlx::Error> {
-    sqlx::query("INSERT INTO users (name, is_admin) VALUES (?, ?)")
+    sqlx::query("INSERT INTO users (name, is_admin) VALUES (?, ?) ON CONFLICT(name) DO NOTHING")
         .bind(name)
         .bind(0_i64)
         .execute(pool)
@@ -684,5 +744,101 @@ mod tests {
             .await
             .expect("second generation should succeed");
         assert_eq!(second_created, 0);
+    }
+
+    #[tokio::test]
+    async fn generation_keeps_local_time_across_both_dst_changes() {
+        for (now, before, after) in [
+            (
+                "2030-03-24T00:00:00Z",
+                "2030-03-25T19:00:00Z",
+                "2030-04-01T18:00:00Z",
+            ),
+            (
+                "2030-10-20T00:00:00Z",
+                "2030-10-21T18:00:00Z",
+                "2030-10-28T19:00:00Z",
+            ),
+        ] {
+            let pool = init_pool("sqlite::memory:").await.unwrap();
+            let now = chrono::DateTime::parse_from_rfc3339(now)
+                .unwrap()
+                .with_timezone(&Utc);
+            create_upcoming_slots(&pool, now).await.unwrap();
+            let dates: Vec<String> =
+                sqlx::query_scalar("SELECT datetime FROM slots WHERE venue = 'Luisenschule'")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+            assert!(dates.contains(&before.to_string()), "{dates:?}");
+            assert!(dates.contains(&after.to_string()), "{dates:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn renewal_extends_window_and_preserves_legacy_booked_slots() {
+        let pool = init_pool("sqlite::memory:").await.unwrap();
+        sqlx::query(
+            "INSERT INTO slots (datetime, venue) VALUES ('2030-03-25T20:00:00Z', 'Luisenschule')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO bookings (slot_id, user_id, position) SELECT id, 1, 1 FROM slots WHERE datetime = '2030-03-25T20:00:00Z'")
+            .execute(&pool).await.unwrap();
+        let now = Utc.with_ymd_and_hms(2030, 3, 25, 12, 0, 0).unwrap();
+        create_upcoming_slots(&pool, now).await.unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM slots WHERE venue = 'Luisenschule' AND date(datetime) = '2030-03-25'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(count, 1);
+        let bookings: i64 = sqlx::query_scalar("SELECT count(*) FROM bookings b JOIN slots s ON b.slot_id = s.id WHERE s.datetime = '2030-03-25T20:00:00Z'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(bookings, 1);
+        assert!(
+            create_upcoming_slots(&pool, now + chrono::Days::new(7))
+                .await
+                .unwrap()
+                > 0
+        );
+        assert_eq!(
+            create_upcoming_slots(&pool, now + chrono::Days::new(7))
+                .await
+                .unwrap(),
+            0
+        );
+        let slots = super::list_slots_at(&pool, now).await.unwrap();
+        assert!(
+            slots
+                .iter()
+                .all(|slot| chrono::DateTime::parse_from_rfc3339(&slot.datetime).unwrap() > now)
+        );
+    }
+
+    #[tokio::test]
+    async fn generation_uses_berlin_date_at_utc_midnight_boundary() {
+        let pool = init_pool("sqlite::memory:").await.unwrap();
+        let now = Utc.with_ymd_and_hms(2030, 4, 4, 22, 30, 0).unwrap();
+        create_upcoming_slots(&pool, now).await.unwrap();
+        let last: String =
+            sqlx::query_scalar("SELECT max(datetime) FROM slots WHERE datetime LIKE '2030%'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        // Local window starts Friday 5 April and includes Thursday 18 April.
+        assert_eq!(last, "2030-04-18T18:00:00Z");
+        assert_eq!(create_upcoming_slots(&pool, now).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn generation_does_not_create_slots_that_have_already_started_today() {
+        let pool = init_pool("sqlite::memory:").await.unwrap();
+        let now = Utc.with_ymd_and_hms(2030, 3, 25, 19, 30, 0).unwrap();
+        create_upcoming_slots(&pool, now).await.unwrap();
+        let count: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM slots WHERE date(datetime) = '2030-03-25'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(count, 0);
     }
 }

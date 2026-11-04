@@ -1,5 +1,6 @@
 pub mod db;
 pub mod error;
+mod identity;
 pub mod models;
 
 use crate::{
@@ -8,41 +9,49 @@ use crate::{
         create_upcoming_slots, create_user, find_slot, find_user_by_id, find_user_by_name,
         list_slots, list_users, promote_waitlist_user, signup_for_slot,
     },
-    models::{Slot, UserIdentity},
+    identity::{AdminIdentity, BookingIdentity, current_user_from_headers},
+    models::{Slot, SlotWeek, UserIdentity, group_slots},
 };
 use askama::Template;
 use axum::{
     Form, Router,
     extract::{Path, State},
     http::{HeaderMap, HeaderName, HeaderValue, header},
-    response::{Html, IntoResponse, Response},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
 use chrono::Utc;
 use error::AppError;
 use serde::Deserialize;
 use sqlx::SqlitePool;
-use std::path::Path as FsPath;
+use std::{path::Path as FsPath, time::Duration};
 use tower_http::trace::TraceLayer;
 
 #[derive(Template)]
 #[template(path = "slots.html")]
 struct SlotsTemplate {
+    user_selector_html: String,
+    identity_refresh_html: String,
     title: String,
-    current_user_label: String,
     current_user_id: Option<i64>,
     current_user_is_admin: bool,
-    slots: Vec<Slot>,
+    weeks: Vec<SlotWeek>,
+}
+
+#[derive(Template)]
+#[template(path = "welcome.html")]
+struct WelcomeTemplate {
+    title: String,
+    user_selector_html: String,
 }
 
 #[derive(Template)]
 #[template(path = "slots_content.html")]
 struct SlotsContentTemplate {
-    title: String,
-    current_user_label: String,
+    identity_refresh_html: String,
     current_user_id: Option<i64>,
     current_user_is_admin: bool,
-    slots: Vec<Slot>,
+    weeks: Vec<SlotWeek>,
 }
 
 #[derive(Template)]
@@ -51,24 +60,17 @@ struct SlotCardTemplate {
     slot: Slot,
     current_user_id: Option<i64>,
     current_user_is_admin: bool,
+    feedback: String,
 }
 
 #[derive(Template)]
 #[template(path = "user_selector.html")]
 struct UserSelectorTemplate {
+    out_of_band: bool,
     users: Vec<UserIdentity>,
     selected_user_id: Option<i64>,
     current_user_label: String,
     current_user_is_admin: bool,
-}
-
-impl UserSelectorTemplate {
-    fn is_selected<T>(&self, user_id: T) -> bool
-    where
-        T: std::borrow::Borrow<i64>,
-    {
-        self.selected_user_id == Some(*user_id.borrow())
-    }
 }
 
 #[derive(Deserialize)]
@@ -90,8 +92,25 @@ pub async fn app() -> Result<Router, AppError> {
             "sqlite://tmp/hoopline.db".to_string()
         }
     });
+    if database_url == "sqlite://tmp/hoopline.db" {
+        std::fs::create_dir_all("tmp")?;
+    }
     let pool = db::init_pool(&database_url).await?;
     create_upcoming_slots(&pool, Utc::now()).await?;
+    let renewal_pool = pool.clone();
+    tokio::spawn(async move {
+        let mut timer = tokio::time::interval(Duration::from_secs(60));
+        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            timer.tick().await;
+            if renewal_pool.is_closed() {
+                break;
+            }
+            if let Err(error) = create_upcoming_slots(&renewal_pool, Utc::now()).await {
+                eprintln!("slot renewal failed; will retry in one minute: {error}");
+            }
+        }
+    });
 
     Ok(app_with_pool(pool))
 }
@@ -114,9 +133,25 @@ pub fn app_with_pool(pool: SqlitePool) -> Router {
         .route("/admin/slots/generate", post(admin_generate_slots))
         .route("/users", get(users_fragment))
         .route("/users/select", post(select_user))
+        .route("/users/logout", post(logout))
         .route("/healthz", get(healthz))
         .route("/robots.txt", get(robots))
+        .route("/assets/app.css", get(app_css))
+        .route("/assets/app.js", get(app_js))
+        .route("/assets/name-search.js", get(name_search_js))
+        .route(
+            "/favicon.ico",
+            get(|| async { axum::http::StatusCode::NO_CONTENT }),
+        )
         .with_state(pool)
+        .layer(axum::middleware::map_response(
+            |mut response: Response| async move {
+                response
+                    .headers_mut()
+                    .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+                response
+            },
+        ))
         .layer(TraceLayer::new_for_http())
 }
 
@@ -125,16 +160,22 @@ async fn index(
     headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
     let current_user = current_user_from_headers(&pool, &headers).await?;
+    if current_user.is_none() {
+        let welcome = WelcomeTemplate {
+            title: "Hoopline".into(),
+            user_selector_html: render_user_selector(&pool, None, false).await?,
+        };
+        return Ok(Html(welcome.render()?));
+    }
     let current_user_id = current_user.as_ref().map(|user| user.id);
     let current_user_is_admin = current_user.as_ref().is_some_and(|user| user.is_admin);
     let template = SlotsTemplate {
+        user_selector_html: render_user_selector(&pool, current_user.as_ref(), false).await?,
+        identity_refresh_html: String::new(),
         title: "Hoopline".to_string(),
-        current_user_label: current_user
-            .as_ref()
-            .map_or_else(|| "Select your name".to_string(), |user| user.name.clone()),
         current_user_id,
         current_user_is_admin,
-        slots: list_slots(&pool).await?,
+        weeks: group_slots(list_slots(&pool).await?),
     };
     Ok(Html(template.render()?))
 }
@@ -142,32 +183,28 @@ async fn index(
 async fn slots_fragment(
     State(pool): State<SqlitePool>,
     headers: HeaderMap,
-) -> Result<Html<String>, AppError> {
+) -> Result<Response, AppError> {
     let current_user = current_user_from_headers(&pool, &headers).await?;
+    if current_user.is_none() {
+        return Ok(identity_redirect(&headers, "/"));
+    }
     let current_user_id = current_user.as_ref().map(|user| user.id);
     let current_user_is_admin = current_user.as_ref().is_some_and(|user| user.is_admin);
     let template = SlotsContentTemplate {
-        title: "Hoopline".to_string(),
-        current_user_label: current_user
-            .as_ref()
-            .map_or_else(|| "Select your name".to_string(), |user| user.name.clone()),
+        identity_refresh_html: render_user_selector(&pool, current_user.as_ref(), true).await?,
         current_user_id,
         current_user_is_admin,
-        slots: list_slots(&pool).await?,
+        weeks: group_slots(list_slots(&pool).await?),
     };
-    Ok(Html(template.render()?))
+    Ok(Html(template.render()?).into_response())
 }
 
 async fn signup_slot(
     State(pool): State<SqlitePool>,
     Path(slot_id): Path<i64>,
-    headers: HeaderMap,
+    current_user: BookingIdentity,
 ) -> Result<Html<String>, AppError> {
-    let current_user = current_user_from_headers(&pool, &headers)
-        .await?
-        .ok_or_else(|| AppError::BadRequest("select your name first".to_string()))?;
-
-    match signup_for_slot(&pool, slot_id, current_user.id).await? {
+    match signup_for_slot(&pool, slot_id, current_user.id()).await? {
         SignupOutcome::AddedPlayer | SignupOutcome::AddedWaitlist => {}
         SignupOutcome::AlreadySignedUp => {
             return Err(AppError::BadRequest(
@@ -182,15 +219,24 @@ async fn signup_slot(
         SignupOutcome::SlotNotFound => {
             return Err(AppError::BadRequest("slot does not exist".to_string()));
         }
+        SignupOutcome::Started => {
+            return Err(AppError::BadRequest(
+                "This slot has started. Refresh to see upcoming slots.".into(),
+            ));
+        }
     }
 
     let slot = find_slot(&pool, slot_id)
         .await?
         .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
     let template = SlotCardTemplate {
+        feedback: format!(
+            "Booking saved. {}.",
+            slot.booking_status(&Some(current_user.id()))
+        ),
         slot,
-        current_user_id: Some(current_user.id),
-        current_user_is_admin: current_user.is_admin,
+        current_user_id: Some(current_user.id()),
+        current_user_is_admin: current_user.is_admin(),
     };
     Ok(Html(template.render()?))
 }
@@ -198,13 +244,9 @@ async fn signup_slot(
 async fn cancel_slot(
     State(pool): State<SqlitePool>,
     Path(slot_id): Path<i64>,
-    headers: HeaderMap,
+    current_user: BookingIdentity,
 ) -> Result<Html<String>, AppError> {
-    let current_user = current_user_from_headers(&pool, &headers)
-        .await?
-        .ok_or_else(|| AppError::BadRequest("select your name first".to_string()))?;
-
-    match cancel_booking_for_slot(&pool, slot_id, current_user.id).await? {
+    match cancel_booking_for_slot(&pool, slot_id, current_user.id()).await? {
         CancelOutcome::Cancelled => {}
         CancelOutcome::NotSignedUp => {
             return Err(AppError::BadRequest(
@@ -220,9 +262,10 @@ async fn cancel_slot(
         .await?
         .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
     let template = SlotCardTemplate {
+        feedback: "Booking cancelled. You are no longer on this list.".into(),
         slot,
-        current_user_id: Some(current_user.id),
-        current_user_is_admin: current_user.is_admin,
+        current_user_id: Some(current_user.id()),
+        current_user_is_admin: current_user.is_admin(),
     };
     Ok(Html(template.render()?))
 }
@@ -230,10 +273,8 @@ async fn cancel_slot(
 async fn admin_remove_slot_user(
     State(pool): State<SqlitePool>,
     Path((slot_id, user_id)): Path<(i64, i64)>,
-    headers: HeaderMap,
+    current_user: AdminIdentity,
 ) -> Result<Html<String>, AppError> {
-    let current_user = current_admin_from_headers(&pool, &headers).await?;
-
     match cancel_booking_for_slot(&pool, slot_id, user_id).await? {
         CancelOutcome::Cancelled => {}
         CancelOutcome::NotSignedUp => {
@@ -250,8 +291,9 @@ async fn admin_remove_slot_user(
         .await?
         .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
     let template = SlotCardTemplate {
+        feedback: "Player removed. The waitlist has been updated.".into(),
         slot,
-        current_user_id: Some(current_user.id),
+        current_user_id: Some(current_user.id()),
         current_user_is_admin: true,
     };
     Ok(Html(template.render()?))
@@ -260,10 +302,8 @@ async fn admin_remove_slot_user(
 async fn admin_promote_waitlist_user(
     State(pool): State<SqlitePool>,
     Path((slot_id, user_id)): Path<(i64, i64)>,
-    headers: HeaderMap,
+    current_user: AdminIdentity,
 ) -> Result<Html<String>, AppError> {
-    let current_user = current_admin_from_headers(&pool, &headers).await?;
-
     match promote_waitlist_user(&pool, slot_id, user_id).await? {
         PromoteOutcome::Promoted => {}
         PromoteOutcome::NotWaitlisted => {
@@ -285,8 +325,9 @@ async fn admin_promote_waitlist_user(
         .await?
         .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
     let template = SlotCardTemplate {
+        feedback: "Waitlist player promoted.".into(),
         slot,
-        current_user_id: Some(current_user.id),
+        current_user_id: Some(current_user.id()),
         current_user_is_admin: true,
     };
     Ok(Html(template.render()?))
@@ -294,16 +335,14 @@ async fn admin_promote_waitlist_user(
 
 async fn admin_generate_slots(
     State(pool): State<SqlitePool>,
-    headers: HeaderMap,
+    current_user: AdminIdentity,
 ) -> Result<Html<String>, AppError> {
-    let current_user = current_admin_from_headers(&pool, &headers).await?;
     create_upcoming_slots(&pool, Utc::now()).await?;
     let template = SlotsContentTemplate {
-        title: "Hoopline".to_string(),
-        current_user_label: current_user.name.clone(),
-        current_user_id: Some(current_user.id),
+        identity_refresh_html: String::new(),
+        current_user_id: Some(current_user.id()),
         current_user_is_admin: true,
-        slots: list_slots(&pool).await?,
+        weeks: group_slots(list_slots(&pool).await?),
     };
     Ok(Html(template.render()?))
 }
@@ -313,60 +352,90 @@ async fn users_fragment(
     headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
     let current_user = current_user_from_headers(&pool, &headers).await?;
-    let selected_user_id = current_user.as_ref().map(|user| user.id);
-    let current_user_label = current_user
-        .as_ref()
-        .map_or_else(|| "Select your name".to_string(), |user| user.name.clone());
+    Ok(Html(
+        render_user_selector(&pool, current_user.as_ref(), false).await?,
+    ))
+}
+
+async fn render_user_selector(
+    pool: &SqlitePool,
+    user: Option<&UserIdentity>,
+    out_of_band: bool,
+) -> Result<String, AppError> {
     let template = UserSelectorTemplate {
-        users: list_users(&pool).await?,
-        selected_user_id,
-        current_user_label,
-        current_user_is_admin: current_user.as_ref().is_some_and(|user| user.is_admin),
+        out_of_band,
+        users: if user.is_none() {
+            list_users(pool).await?
+        } else {
+            Vec::new()
+        },
+        selected_user_id: user.map(|user| user.id),
+        current_user_label: user
+            .map_or_else(|| "Select your name".into(), |user| user.name.clone()),
+        current_user_is_admin: user.is_some_and(|user| user.is_admin),
     };
-    Ok(Html(template.render()?))
+    Ok(template.render()?)
 }
 
 async fn select_user(
     State(pool): State<SqlitePool>,
+    headers: HeaderMap,
     Form(form): Form<UserSelectionForm>,
 ) -> Result<Response, AppError> {
-    let selected_user = if let Some(new_user_name) = form.new_user_name {
-        let trimmed_name = new_user_name.trim();
-        if trimmed_name.is_empty() {
-            return Err(AppError::BadRequest(
-                "new user name cannot be empty".to_string(),
-            ));
-        }
-        if let Some(existing_user) = find_user_by_name(&pool, trimmed_name).await? {
-            existing_user
-        } else {
-            create_user(&pool, trimmed_name).await?
-        }
-    } else if let Some(selected_user_id) = form.selected_user_id {
+    let selected_user = if let Some(selected_user_id) = form.selected_user_id {
         find_user_by_id(&pool, selected_user_id)
             .await?
             .ok_or_else(|| AppError::BadRequest("selected user does not exist".to_string()))?
+    } else if let Some(new_user_name) = form.new_user_name {
+        let trimmed_name = new_user_name.trim();
+        if trimmed_name.is_empty() || trimmed_name.chars().count() > 64 {
+            return Err(AppError::BadRequest(
+                "Enter a name with 1 to 64 characters.".to_string(),
+            ));
+        }
+        if find_user_by_name(&pool, trimmed_name).await?.is_some() {
+            return Err(AppError::BadRequest(
+                "This name already exists. Choose your name from the list.".into(),
+            ));
+        }
+        create_user(&pool, trimmed_name).await?
     } else {
         return Err(AppError::BadRequest(
-            "select an existing user or create a new one".to_string(),
+            "Choose your name from the list. If it is missing, use Add a new member.".to_string(),
         ));
     };
 
-    let template = UserSelectorTemplate {
-        users: list_users(&pool).await?,
-        selected_user_id: Some(selected_user.id),
-        current_user_label: selected_user.name.clone(),
-        current_user_is_admin: selected_user.is_admin,
-    };
-    let mut response = Html(template.render()?).into_response();
+    let mut response = identity_redirect(&headers, "/slots");
     response.headers_mut().insert(
         header::SET_COOKIE,
         user_cookie_header_value(selected_user.id)?,
     );
-    response.headers_mut().insert(
-        HeaderName::from_static("hx-trigger"),
-        HeaderValue::from_static("user-changed"),
-    );
+    Ok(response)
+}
+
+fn identity_redirect(headers: &HeaderMap, destination: &'static str) -> Response {
+    if headers
+        .get("hx-request")
+        .is_some_and(|value| value == "true")
+    {
+        (
+            [(
+                HeaderName::from_static("hx-redirect"),
+                HeaderValue::from_static(destination),
+            )],
+            "",
+        )
+            .into_response()
+    } else {
+        Redirect::to(destination).into_response()
+    }
+}
+
+async fn logout(headers: HeaderMap) -> Result<Response, AppError> {
+    let mut response = identity_redirect(&headers, "/");
+    response
+        .headers_mut()
+        .insert(header::SET_COOKIE, identity_cookie("", 0)?);
     Ok(response)
 }
 
@@ -378,41 +447,38 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
-async fn current_user_from_headers(
-    pool: &SqlitePool,
-    headers: &HeaderMap,
-) -> Result<Option<UserIdentity>, AppError> {
-    if let Some(user_id) = user_id_from_cookie(headers) {
-        return find_user_by_id(pool, user_id).await.map_err(AppError::from);
-    }
-    Ok(None)
+async fn app_css() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        include_str!("../assets/app.css"),
+    )
 }
 
-async fn current_admin_from_headers(
-    pool: &SqlitePool,
-    headers: &HeaderMap,
-) -> Result<UserIdentity, AppError> {
-    let current_user = current_user_from_headers(pool, headers)
-        .await?
-        .ok_or_else(|| AppError::Forbidden("admin access required".to_string()))?;
-    if !current_user.is_admin {
-        return Err(AppError::Forbidden("admin access required".to_string()));
-    }
-    Ok(current_user)
+async fn app_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../assets/app.js"),
+    )
 }
 
-fn user_id_from_cookie(headers: &HeaderMap) -> Option<i64> {
-    let raw_cookie = headers.get(header::COOKIE)?.to_str().ok()?;
-    raw_cookie
-        .split(';')
-        .find_map(|part| {
-            let (name, value) = part.trim().split_once('=')?;
-            (name == "user_id").then_some(value)
-        })
-        .and_then(|value| value.parse::<i64>().ok())
+async fn name_search_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../assets/name-search.js"),
+    )
 }
 
 fn user_cookie_header_value(user_id: i64) -> Result<HeaderValue, AppError> {
-    let value = format!("user_id={user_id}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax");
+    identity_cookie(&user_id.to_string(), 31_536_000)
+}
+
+fn identity_cookie(value: &str, max_age: u32) -> Result<HeaderValue, AppError> {
+    let secure = if std::env::var("COOKIE_SECURE").is_ok_and(|value| value == "true") {
+        "; Secure"
+    } else {
+        ""
+    };
+    let value =
+        format!("user_id={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax{secure}");
     Ok(HeaderValue::from_str(&value)?)
 }

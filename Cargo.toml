@@ -14,6 +14,10 @@ tower-http = { version = "0.6", features = ["trace"] }
 http-body-util = "0.1"
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls", "migrate"] }
 chrono = { version = "0.4", default-features = true }
+chrono-tz = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints.clippy]
 pedantic = { level = "deny", priority = -1 }

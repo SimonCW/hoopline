@@ -3,21 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Error</title>
-    <link href="https://cdn.jsdelivr.net/npm/daisyui@5.5.16/daisyui.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.18/dist/index.global.js"></script>
+    <title>Request failed · Hoopline</title>
+    <link href="/assets/app.css" rel="stylesheet">
 </head>
-<body class="bg-base-200 text-base-content" data-theme="light">
-    <main class="min-h-screen p-4 flex items-center justify-center">
-        <div class="card w-full max-w-xl bg-base-100 shadow-xl">
-            <div class="card-body">
-                <h1 class="card-title text-error">Something went wrong</h1>
-                <p class="text-sm sm:text-base break-words">{{ message }}</p>
-                <div class="card-actions justify-end mt-2">
-                    <a href="/slots" class="btn btn-primary btn-sm">Back to slots</a>
-                </div>
-            </div>
-        </div>
-    </main>
-</body>
+<body><main class="app-shell"><div class="card empty-state">
+    <h1>Request failed</h1>
+    <p>{{ message }}</p>
+    <a href="/slots" class="btn btn-primary">Back to slots</a>
+</div></main></body>
 </html>

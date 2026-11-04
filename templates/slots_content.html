@@ -1,18 +1,21 @@
-<section
-    id="slots-content"
-    class="max-w-7xl w-full space-y-4"
-    hx-get="/slots/fragment"
-    hx-trigger="user-changed from:body"
-    hx-swap="outerHTML"
->
-    <div class="text-center">
-        <h1 class="text-3xl font-bold">{{ title }}</h1>
-        <p class="text-base-content/70">Upcoming slots</p>
-        <p class="text-sm text-base-content/60">Current user: {{ current_user_label }}</p>
-    </div>
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        {% for slot in slots %}
-            {% include "slot_card.html" %}
-        {% endfor %}
-    </div>
+<section id="slots-content" class="slots-content"
+    hx-get="/slots/fragment" hx-trigger="refresh-slots from:body"
+    hx-swap="outerHTML" hx-sync="body:queue last" aria-labelledby="slots-heading">
+    <h2 id="slots-heading" class="sr-only" tabindex="-1">Upcoming slots</h2>
+    <p class="booking-help">Pick a slot and join. If the player list is full, join the waitlist. When a player cancels, the first person in line moves up automatically.</p>
+    {% if weeks.is_empty() %}
+    <div class="card empty-state"><h2>No upcoming slots</h2><p>Please check again soon. New slots open automatically for the next 14 days.</p></div>
+    {% endif %}
+    {% let feedback = "" %}
+    {% for week in weeks %}
+    <section class="slot-week" aria-labelledby="week-{{ week.key }}">
+        <h2 id="week-{{ week.key }}" class="week-heading">{{ week.label }}</h2>
+        <div class="slot-grid">
+            {% for slot in week.slots %}
+                {% include "slot_card.html" %}
+            {% endfor %}
+        </div>
+    </section>
+    {% endfor %}
 </section>
+{{ identity_refresh_html|safe }}

@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Choose your name{% endblock %}
+{% block content %}
+<div class="welcome-shell">
+    {{ user_selector_html|safe }}
+</div>
+{% endblock %}
