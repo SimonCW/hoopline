@@ -33,9 +33,9 @@ a { color: var(--accent); }
 .brand-row { margin-bottom: .5rem; }
 .brand-row h1 { min-width: 0; }
 .brand-row form, .identity-summary > .btn { flex-shrink: 0; }
+.brand-row .btn, .identity-summary > .btn, .admin-entry .btn { width: 7.5rem; min-height: 48px; padding: .5rem .65rem; font-size: .85rem; }
 .member-greeting { min-width: 0; color: var(--muted); font-size: .9rem; }
 .member-greeting .identity-name { padding: .2rem .5rem; border-radius: .4rem; background: #dceee4; color: #104e36; font-size: 1rem; font-weight: 750; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
-.identity-summary > .btn { max-width: 6rem; padding: .5rem .65rem; font-size: .8rem; }
 #refresh-slots { gap: .4rem; }
 .refresh-icon { width: 1rem; height: 1rem; flex-shrink: 0; }
 body:has(#slots-content[aria-busy="true"], #slots-content.htmx-settling) .refresh-icon { color: var(--accent); animation: refresh-spin .85s linear infinite; }
@@ -62,7 +62,9 @@ input[type="checkbox"] { width: auto; min-height: auto; }
 .btn-secondary { background: #f7faf8; }
 .btn:disabled { cursor: default; background: #dce3de; border-color: #a3b2a8; color: #4a5d53; }
 .btn-small { min-height: 44px; padding: .5rem .65rem; font-size: .85rem; }
-.booking-help { color: var(--muted); margin-bottom: 1.5rem; font-size: .9rem; }
+.overview-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; }
+.admin-entry { flex-shrink: 0; }
+.booking-help { color: var(--muted); font-size: .9rem; }
 .week-heading { margin: 1.5rem 0 .75rem; color: #3b5147; }
 .slot-grid { display: grid; gap: 1rem; }
 .slot-card { min-width: 0; }

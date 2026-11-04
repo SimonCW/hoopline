@@ -8,6 +8,7 @@ pub struct Slot {
     pub is_override: bool,
     pub datetime: String,
     pub venue: String,
+    pub map_url: String,
     pub max_players: usize,
     pub max_waitlist: usize,
     pub players: Vec<String>,
@@ -141,7 +142,7 @@ impl Slot {
             return format!("Waitlist #{}", position + 1);
         }
         if user_id.is_some_and(|id| self.player_user_ids.contains(&id)) {
-            return "Confirmed player".into();
+            return "Confirmed 🏀".into();
         }
         if self.has_started() {
             "Slot has started".into()
@@ -202,6 +203,7 @@ mod tests {
             is_override: false,
             datetime: datetime.into(),
             venue: "Court".into(),
+            map_url: String::new(),
             max_players: 1,
             max_waitlist: 1,
             players: vec!["Alex".into()],
@@ -214,7 +216,7 @@ mod tests {
     #[test]
     fn status_and_capacity_use_the_slot_limits() {
         let mut slot = slot("2099-01-05T19:00:00Z");
-        assert_eq!(slot.booking_status(&Some(1)), "Confirmed player");
+        assert_eq!(slot.booking_status(&Some(1)), "Confirmed 🏀");
         assert_eq!(slot.booking_status(&Some(2)), "Waitlist #1");
         assert_eq!(slot.booking_status(&Some(3)), "Slot full");
         assert!(!slot.can_accept_signup());

@@ -10,6 +10,7 @@
         <label for="game-date">Date</label><input id="game-date" type="date" name="date" value="{{ slot.edit_date() }}" required>
         <label for="game-time">Time</label><input id="game-time" type="time" name="time" value="{{ slot.edit_time() }}" required>
         <label for="game-venue">Location</label><input id="game-venue" name="venue" value="{{ slot.venue }}" maxlength="120" required>
+        <label for="game-map">Maps link (optional)</label><input id="game-map" type="url" name="map_url" value="{{ slot.map_url }}" maxlength="2048">
         {% if !slot.players.is_empty() || !slot.waitlist.is_empty() %}
         <fieldset><legend>What should happen to the bookings?</legend>
             <label><input type="radio" name="bookings" value="keep" required> Keep all bookings</label>

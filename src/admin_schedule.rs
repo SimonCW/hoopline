@@ -22,6 +22,7 @@ struct Schedule {
     weekday: i64,
     time_local: String,
     venue: String,
+    map_url: String,
     max_players: i64,
     max_waitlist: i64,
     is_active: bool,
@@ -44,6 +45,7 @@ pub(crate) struct ScheduleForm {
     weekday: i64,
     time_local: String,
     venue: String,
+    map_url: Option<String>,
     max_players: i64,
     max_waitlist: i64,
     is_active: Option<String>,
@@ -64,7 +66,7 @@ pub(crate) async fn page(
         .await?
         .filter(|user| user.is_admin)
         .ok_or_else(|| AppError::Forbidden("admin access required".into()))?;
-    let rows = sqlx::query("SELECT id, weekday, time_local, venue, max_players, max_waitlist, is_active, revision FROM slot_schedules ORDER BY weekday, time_local, id")
+    let rows = sqlx::query("SELECT id, weekday, time_local, venue, map_url, max_players, max_waitlist, is_active, revision FROM slot_schedules ORDER BY weekday, time_local, id")
         .fetch_all(&pool).await?;
     let schedules = rows
         .into_iter()
@@ -74,6 +76,7 @@ pub(crate) async fn page(
                 weekday: row.try_get("weekday")?,
                 time_local: row.try_get("time_local")?,
                 venue: row.try_get("venue")?,
+                map_url: row.try_get("map_url")?,
                 max_players: row.try_get("max_players")?,
                 max_waitlist: row.try_get("max_waitlist")?,
                 is_active: row.try_get::<i64, _>("is_active")? != 0,
@@ -132,8 +135,9 @@ pub(crate) async fn create(
     Form(form): Form<ScheduleForm>,
 ) -> Result<Response, AppError> {
     validate(&form)?;
-    sqlx::query("INSERT INTO slot_schedules (weekday, time_local, venue, max_players, max_waitlist, is_active) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(form.weekday).bind(&form.time_local).bind(form.venue.trim()).bind(form.max_players).bind(form.max_waitlist)
+    let map_url = crate::validate_map_url(form.map_url.as_deref())?.unwrap_or_default();
+    sqlx::query("INSERT INTO slot_schedules (weekday, time_local, venue, map_url, max_players, max_waitlist, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(form.weekday).bind(&form.time_local).bind(form.venue.trim()).bind(map_url).bind(form.max_players).bind(form.max_waitlist)
         .bind(i64::from(form.is_active.is_some())).execute(&pool).await?;
     Ok(identity_redirect(&headers, "/admin/schedule"))
 }
@@ -146,9 +150,10 @@ pub(crate) async fn update(
     Form(form): Form<ScheduleForm>,
 ) -> Result<Response, AppError> {
     validate(&form)?;
+    let map_url = crate::validate_map_url(form.map_url.as_deref())?;
     let revision = form.revision.ok_or(AppError::StaleSlot)?;
-    let result = sqlx::query("UPDATE slot_schedules SET weekday=?, time_local=?, venue=?, max_players=?, max_waitlist=?, is_active=?, revision=revision+1 WHERE id=? AND revision=?")
-        .bind(form.weekday).bind(&form.time_local).bind(form.venue.trim()).bind(form.max_players).bind(form.max_waitlist)
+    let result = sqlx::query("UPDATE slot_schedules SET weekday=?, time_local=?, venue=?, map_url=COALESCE(?, map_url), max_players=?, max_waitlist=?, is_active=?, revision=revision+1 WHERE id=? AND revision=?")
+        .bind(form.weekday).bind(&form.time_local).bind(form.venue.trim()).bind(map_url).bind(form.max_players).bind(form.max_waitlist)
         .bind(i64::from(form.is_active.is_some())).bind(id).bind(revision).execute(&pool).await?;
     if result.rows_affected() != 1 {
         return Err(AppError::StaleSlot);

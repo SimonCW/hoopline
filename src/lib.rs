@@ -107,8 +107,25 @@ struct GameEditForm {
     date: String,
     time: String,
     venue: String,
+    map_url: Option<String>,
     revision: i64,
     bookings: Option<String>,
+}
+
+fn validate_map_url(value: Option<&str>) -> Result<Option<String>, AppError> {
+    let Some(value) = value else { return Ok(None) };
+    let value = value.trim();
+    if !value.is_empty()
+        && (value.len() > 2048
+            || !url::Url::parse(value).is_ok_and(|url| {
+                matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
+            }))
+    {
+        return Err(AppError::BadRequest(
+            "Enter a valid HTTP or HTTPS maps link.".into(),
+        ));
+    }
+    Ok(Some(value.into()))
 }
 
 #[derive(Default, Deserialize)]
@@ -314,6 +331,7 @@ async fn admin_edit_game(
             revision: form.revision,
             datetime,
             venue: venue.into(),
+            map_url: validate_map_url(form.map_url.as_deref())?,
             clear_bookings,
         },
     )
