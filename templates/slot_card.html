@@ -17,7 +17,7 @@
         {% if admin_mode %}
         <a class="btn btn-secondary" href="/admin/slots/{{ slot.id }}/edit">Edit this game</a>
         {% elif slot.has_started() %}
-        <p>This slot has started. Refresh to see upcoming slots.</p>
+        <p>This game has started. Signups are closed.</p>
         {% elif current_user_id.is_none() %}
         <a class="btn btn-primary" href="#user-selector">Select your name to join</a>
         {% elif slot.user_is_signed_up(current_user_id) %}

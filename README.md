@@ -18,12 +18,12 @@ Use a current stable Rust toolchain that supports edition 2024. The member UX ch
 For a disposable preview with sample data:
 
 ```sh
-DATABASE_URL=sqlite::memory: cargo run
+DATABASE_URL=sqlite::memory: PREVIEW_SAMPLE=1 cargo run
 ```
 
 ### Member booking behavior
 
-- Upcoming slots appear in weekly groups, with compact cards for phones.
+- Games remain visible through their Berlin calendar day. Signups close when a game starts.
 - On the first visit, enter your name before seeing the booking overview. Fuzzy suggestions support partial names and small spelling errors. Select your existing name, or explicitly add a new member.
 - Select a suggestion before continuing. The app submits the selected member ID, not the search text. Editing the text clears the selection. Existing names cannot sign in through the new-member form.
 - The app remembers your user ID for one year in an `HttpOnly`, `SameSite=Lax` cookie. Returning visitors go straight to the overview. Names and booking details are not stored in the cookie.

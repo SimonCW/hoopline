@@ -1291,6 +1291,39 @@ async fn e2e_signup_cancel_and_promotion_flow() {
 }
 
 #[tokio::test]
+async fn games_remain_visible_until_the_next_berlin_day() {
+    use chrono::TimeZone;
+    let pool = test_pool().await;
+    sqlx::query("UPDATE slots SET datetime = '2030-03-26T19:00:00Z' WHERE id = 1")
+        .execute(&pool)
+        .await
+        .unwrap();
+    // 20:00 Berlin: show the game at its start and through 23:59:59.
+    for now in [
+        chrono::Utc.with_ymd_and_hms(2030, 3, 26, 19, 0, 0).unwrap(),
+        chrono::Utc
+            .with_ymd_and_hms(2030, 3, 26, 22, 59, 59)
+            .unwrap(),
+    ] {
+        assert!(
+            db::list_slots_at(&pool, now)
+                .await
+                .unwrap()
+                .iter()
+                .any(|slot| slot.id == 1)
+        );
+    }
+    let midnight = chrono::Utc.with_ymd_and_hms(2030, 3, 26, 23, 0, 0).unwrap();
+    assert!(
+        !db::list_slots_at(&pool, midnight)
+            .await
+            .unwrap()
+            .iter()
+            .any(|slot| slot.id == 1)
+    );
+}
+
+#[tokio::test]
 async fn past_slots_are_hidden_and_reject_direct_signup() {
     let pool = test_pool().await;
     sqlx::query("UPDATE slots SET datetime = '2000-01-01T20:00:00Z' WHERE id = 1")

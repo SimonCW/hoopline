@@ -296,6 +296,44 @@ pub async fn create_upcoming_slots(
     Ok(report.created)
 }
 
+/// Adds a full example roster to a disposable preview database.
+///
+/// # Errors
+/// Returns an error if the example data cannot be written.
+pub(crate) async fn seed_preview_roster(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let slot_id: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM slots WHERE schedule_id IS NOT NULL AND julianday(datetime) > julianday(?) ORDER BY julianday(datetime) LIMIT 1",
+    )
+    .bind(Utc::now().to_rfc3339())
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(slot_id) = slot_id else {
+        return Ok(());
+    };
+    sqlx::query("UPDATE slots SET max_players = 15, max_waitlist = 5 WHERE id = ?")
+        .bind(slot_id)
+        .execute(&mut *tx)
+        .await?;
+    for index in 1_i64..=18 {
+        let user_id: i64 = sqlx::query_scalar("INSERT INTO users (name) VALUES (?) RETURNING id")
+            .bind(format!("Preview player {index:02}"))
+            .fetch_one(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO bookings (slot_id, user_id, position, is_waitlist) VALUES (?, ?, ?, ?)",
+        )
+        .bind(slot_id)
+        .bind(user_id)
+        .bind(if index <= 15 { index } else { index - 15 })
+        .bind(i64::from(index > 15))
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 pub(crate) struct GenerationReport {
     pub created: i64,
     pub warnings: Vec<String>,
@@ -417,7 +455,7 @@ pub async fn list_slots(pool: &SqlitePool) -> Result<Vec<Slot>, sqlx::Error> {
     list_slots_at(pool, Utc::now()).await
 }
 
-/// Returns future slots at the supplied instant.
+/// Returns slots from the current Berlin calendar day onward.
 ///
 /// # Errors
 /// Returns an error when querying or decoding slots fails.
@@ -441,11 +479,21 @@ pub async fn list_slots_at(
         FROM slots s
         LEFT JOIN bookings b ON b.slot_id = s.id
         LEFT JOIN users u ON u.id = b.user_id
-        WHERE julianday(s.datetime) > julianday(?)
+        WHERE julianday(s.datetime) >= julianday(?)
         ORDER BY julianday(s.datetime), s.id, b.is_waitlist, b.position
         ",
     )
-    .bind(now.to_rfc3339())
+    .bind(
+        Berlin
+            .from_local_datetime(
+                &now.with_timezone(&Berlin)
+                    .date_naive()
+                    .and_time(NaiveTime::MIN),
+            )
+            .single()
+            .ok_or_else(|| sqlx::Error::Protocol("invalid Berlin day start".into()))?
+            .to_rfc3339(),
+    )
     .fetch_all(pool)
     .await?;
 
@@ -988,7 +1036,21 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use sqlx::Row;
 
-    use super::{create_upcoming_slots, init_pool};
+    use super::{create_upcoming_slots, init_pool, seed_preview_roster};
+
+    #[tokio::test]
+    async fn preview_has_a_full_game_with_three_waiting() {
+        let pool = init_pool("sqlite::memory:").await.unwrap();
+        create_upcoming_slots(&pool, chrono::Utc::now())
+            .await
+            .unwrap();
+        seed_preview_roster(&pool).await.unwrap();
+        let row: (i64, i64) = sqlx::query_as(
+            "SELECT SUM(b.is_waitlist = 0), SUM(b.is_waitlist = 1) FROM bookings b JOIN slots s ON s.id = b.slot_id WHERE s.schedule_id IS NOT NULL GROUP BY s.id HAVING SUM(b.is_waitlist = 0) = 15 AND SUM(b.is_waitlist = 1) = 3",
+        )
+        .fetch_one(&pool).await.unwrap();
+        assert_eq!(row, (15, 3));
+    }
 
     #[tokio::test]
     async fn insert_and_query_users_slots_and_bookings() {
