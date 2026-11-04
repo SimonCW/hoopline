@@ -1,4 +1,4 @@
-<article id="slot-{{ slot.id }}" class="card slot-card" data-testid="slot-card" aria-labelledby="slot-title-{{ slot.id }}"
+<article id="slot-{{ slot.id }}" class="card slot-card{% if admin_mode %} admin-mode-card{% endif %}" data-testid="slot-card" aria-labelledby="slot-title-{{ slot.id }}"
     hx-target="this" hx-swap="outerHTML" hx-sync="body:drop"
     hx-headers='{"X-Hoopline-User": "{{ current_user_id.unwrap_or_default() }}"}'>
     <div class="slot-heading">
@@ -13,16 +13,18 @@
         <span><strong>{{ slot.waitlist.len() }}/{{ slot.max_waitlist }}</strong> waitlist</span>
     </div>
     <div class="slot-actions">
-        {% if slot.has_started() %}
+        {% if admin_mode %}
+        <p class="muted">Use the roster controls to manage this game.</p>
+        {% elif slot.has_started() %}
         <p>This slot has started. Refresh to see upcoming slots.</p>
         {% elif current_user_id.is_none() %}
         <a class="btn btn-primary" href="#user-selector">Select your name to join</a>
         {% elif slot.user_is_signed_up(current_user_id) %}
-        <form hx-post="/slots/{{ slot.id }}/cancel" hx-confirm="Cancel your booking? If you join again, you will go to the end of the current list.">
+        <form hx-post="/slots/{{ slot.id }}/cancel{% if admin_mode %}?mode=admin{% endif %}" hx-confirm="Cancel your booking? If you join again, you will go to the end of the current list.">
             <button id="slot-action-{{ slot.id }}" type="submit" class="btn btn-secondary">Cancel booking</button>
         </form>
         {% elif slot.can_accept_signup() %}
-        <form hx-post="/slots/{{ slot.id }}/signup">
+        <form hx-post="/slots/{{ slot.id }}/signup{% if admin_mode %}?mode=admin{% endif %}">
             <button id="slot-action-{{ slot.id }}" type="submit" class="btn btn-primary">{{ slot.signup_action_label() }}</button>
         </form>
         {% else %}
@@ -33,6 +35,26 @@
     <p class="sr-only" data-feedback>{{ feedback }}</p>
     {% endif %}
     <p class="request-error" role="alert" tabindex="-1" hidden></p>
+    {% if admin_mode %}
+    <details class="admin-add">
+        <summary>Add a member</summary>
+        <form hx-post="/admin/slots/{{ slot.id }}/add" class="admin-add-form">
+            <input type="hidden" name="revision" value="{{ slot.revision }}">
+            <label for="add-user-{{ slot.id }}">Member</label>
+            <select id="add-user-{{ slot.id }}" name="user_id" required>
+                <option value="">Select a member</option>
+                {% for user in users %}{% if !slot.has_user(user.id) %}<option value="{{ user.id }}">{{ user.name }}</option>{% endif %}{% endfor %}
+            </select>
+            <label for="add-list-{{ slot.id }}">List</label>
+            <select id="add-list-{{ slot.id }}" name="list">
+                <option value="players">Players</option><option value="waitlist">Waitlist</option>
+            </select>
+            {% if !slot.waitlist.is_empty() %}<p class="muted">Adding a player overrides the waitlist order.</p>{% endif %}
+            <p class="muted">A waitlisted member moves up automatically when a player is removed.</p>
+            <button class="btn btn-small" type="submit">Add member</button>
+        </form>
+    </details>
+    {% endif %}
     <details id="roster-{{ slot.id }}" class="roster">
         <summary>Who's playing? <span>{{ slot.players.len() }} players · {{ slot.waitlist.len() }} waiting</span></summary>
         <div class="roster-columns">
@@ -43,8 +65,9 @@
                     {% for name in slot.players %}
                     <li data-testid="player-row" class="{% if slot.player_is_current_user(loop.index0, current_user_id) %}current-player{% endif %}">
                         <span class="member-name">{{ name }}</span>
-                        {% if current_user_is_admin && !slot.player_is_current_user(loop.index0, current_user_id) %}
+                        {% if admin_mode && current_user_is_admin %}
                         <form hx-post="/admin/slots/{{ slot.id }}/remove/{{ slot.player_user_id(loop.index0) }}" hx-confirm="Remove this player?">
+                            <input type="hidden" name="revision" value="{{ slot.revision }}">
                             <button type="submit" class="btn btn-small">Remove</button>
                         </form>
                         {% endif %}
@@ -59,13 +82,25 @@
                     {% for name in slot.waitlist %}
                     <li data-testid="waitlist-row" class="{% if slot.waitlist_is_current_user(loop.index0, current_user_id) %}current-player{% endif %}">
                         <span class="member-name">{{ name }}</span>
-                        {% if current_user_is_admin && !slot.waitlist_is_current_user(loop.index0, current_user_id) %}
+                        {% if admin_mode && current_user_is_admin %}
                         <div class="admin-actions">
+                            <form hx-post="/admin/slots/{{ slot.id }}/move/{{ slot.waitlist_user_id(loop.index0) }}">
+                                <input type="hidden" name="revision" value="{{ slot.revision }}">
+                                <input type="hidden" name="direction" value="up">
+                                <button type="submit" class="btn btn-small" aria-label="Move {{ name }} up" {% if loop.first %}disabled{% endif %}>Up</button>
+                            </form>
+                            <form hx-post="/admin/slots/{{ slot.id }}/move/{{ slot.waitlist_user_id(loop.index0) }}">
+                                <input type="hidden" name="revision" value="{{ slot.revision }}">
+                                <input type="hidden" name="direction" value="down">
+                                <button type="submit" class="btn btn-small" aria-label="Move {{ name }} down" {% if loop.last %}disabled{% endif %}>Down</button>
+                            </form>
                             <form hx-post="/admin/slots/{{ slot.id }}/remove/{{ slot.waitlist_user_id(loop.index0) }}" hx-confirm="Remove this waitlist member?">
+                                <input type="hidden" name="revision" value="{{ slot.revision }}">
                                 <button type="submit" class="btn btn-small">Remove</button>
                             </form>
                             {% if slot.can_promote_from_waitlist() %}
                             <form hx-post="/admin/slots/{{ slot.id }}/promote/{{ slot.waitlist_user_id(loop.index0) }}">
+                                <input type="hidden" name="revision" value="{{ slot.revision }}">
                                 <button type="submit" class="btn btn-small">Promote</button>
                             </form>
                             {% endif %}

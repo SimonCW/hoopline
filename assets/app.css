@@ -15,7 +15,7 @@ h1 { font-size: 1.9rem; letter-spacing: -.04em; }
 h2 { font-size: 1.05rem; }
 h3 { font-size: 1.05rem; line-height: 1.4; }
 h4 { margin-bottom: .5rem; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button, summary, a { -webkit-tap-highlight-color: transparent; }
 button, summary { cursor: pointer; }
 a { color: var(--accent); }
@@ -51,6 +51,8 @@ summary::marker { color: var(--accent); }
 .identity-form { display: grid; gap: .5rem; padding: .5rem 0; }
 .identity-form label { font-weight: 600; }
 input { width: 100%; min-width: 0; min-height: 48px; border-radius: .6rem; border: 1px solid #80928b; padding: .65rem .8rem; background: white; color: inherit; font-size: 1rem; }
+select { width: 100%; min-height: 48px; border: 1px solid #80928b; border-radius: .6rem; padding: .5rem; background: white; }
+.admin-add-form { display: grid; gap: .5rem; }
 .btn { min-height: 48px; display: inline-flex; align-items: center; justify-content: center; padding: .65rem 1rem; border: 1px solid #9aada4; border-radius: .6rem; background: white; color: #183f33; font-weight: 650; line-height: 1.3; text-decoration: none; text-align: center; }
 .btn:hover { background: #edf5ef; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: white; }
@@ -85,6 +87,10 @@ input { width: 100%; min-width: 0; min-height: 48px; border-radius: .6rem; borde
 .muted { color: var(--muted); font-size: .85rem; }
 .roster .muted { margin-top: .5rem; }
 .admin-tools { border-top: 1px solid #e1e8e3; }
+.mode-switch { display: flex; gap: .5rem; flex-wrap: wrap; margin: .75rem 0; }
+.mode-switch [aria-current="page"] { border-color: #593a91; background: #eee7fa; color: #40206f; }
+.admin-mode-label { color: #40206f; background: #eee7fa; padding: .5rem .75rem; border-radius: .5rem; font-weight: 700; margin-bottom: .75rem; }
+.admin-mode-card { border: 2px solid #7652a5; }
 .request-error { padding: .75rem; margin-top: .75rem; border-radius: .5rem; overflow-wrap: anywhere; }
 .request-error { background: #fff0ef; border: 1px solid #b43d34; color: #7b211b; }
 .empty-state { display: grid; gap: .75rem; }

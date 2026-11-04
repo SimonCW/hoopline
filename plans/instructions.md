@@ -1,5 +1,9 @@
 # Implementation Instructions - Basketball Slot Booking
 
+This document records the original milestones. For current status and open work, see `refinements.md`. Checked deployment and backup tasks below record setup work, not verification of the current live deployment or a successful restore.
+
+For admin work, follow `admin_experience.md` in three increments. Add schema only when its feature needs it. The agreed release is Sunday at 19:00 Berlin time for the week starting eight days later (8 November 2026 → 16–22 November). The current rolling window stays until the third increment replaces it. Do not build general booking-policy variants, custom browser-process orchestration, navigation locks, or unsaved-change tracking.
+
 ## Philosophy
 
 Build the **smallest deployable thing first**, then iterate. Each milestone should be:
@@ -328,10 +332,10 @@ This is **deployable for testing** with real users (minus admin features).
 
 ### Manual Testing Checklist
 ```
-[ ] Mobile browser: can complete full flow
-[ ] Desktop browser: same
-[ ] Slow connection: HTMX loading states work
-[ ] Multiple users: concurrent signups don't corrupt data
+[ ] Real iOS and Android devices and a screen reader: complete the full flow
+[x] Automated Chromium phone and desktop layouts: complete the member flow
+[x] Automated slow connection and failure checks: request feedback and recovery
+[x] Automated file-backed SQLite check: concurrent signups
 ```
 
 ---

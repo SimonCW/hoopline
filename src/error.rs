@@ -21,6 +21,8 @@ pub enum AppError {
     Forbidden(String),
     #[error("Your selected name changed. Refresh slots before booking.")]
     IdentityChanged,
+    #[error("This game changed. Refresh slots before trying again.")]
+    StaleSlot,
 }
 
 impl IntoResponse for AppError {
@@ -49,10 +51,10 @@ impl IntoResponse for AppError {
             | AppError::InvalidHeaderValue(_) => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
             AppError::Forbidden(_) => StatusCode::FORBIDDEN,
-            AppError::IdentityChanged => StatusCode::CONFLICT,
+            AppError::IdentityChanged | AppError::StaleSlot => StatusCode::CONFLICT,
         };
         let message = match status {
-            StatusCode::CONFLICT if matches!(&self, Self::IdentityChanged) => self.to_string(),
+            StatusCode::CONFLICT if matches!(&self, Self::IdentityChanged | Self::StaleSlot) => self.to_string(),
             StatusCode::CONFLICT => "The list changed while you were booking. Refresh the slots and try again.".into(),
             StatusCode::SERVICE_UNAVAILABLE => "The booking system is busy. Wait a moment, then refresh and try again.".into(),
             StatusCode::INTERNAL_SERVER_ERROR => "We could not complete this request. Refresh and check your booking before trying again.".into(),
