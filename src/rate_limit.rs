@@ -52,8 +52,8 @@ impl RateLimits {
         let requests = clients.entry(key).or_default();
         let (per_minute, per_hour) = match category {
             Category::Login => (5, 20),
-            Category::PlayerSelection => (10, 40),
-            Category::PublicWrite => (30, 200),
+            Category::PlayerSelection => (5, 10),
+            Category::PublicWrite => (10, 20),
         };
         if requests.len() >= per_hour
             || requests
@@ -142,14 +142,28 @@ mod tests {
     fn player_selection_limits_expire_and_do_not_block_bookings() {
         let limits = RateLimits::default();
         let now = Instant::now();
-        for minute in 0..4 {
-            for _ in 0..10 {
+        for minute in 0..2 {
+            for _ in 0..5 {
                 assert!(limits.allow(None, Category::PlayerSelection, now + MINUTE * minute));
             }
             assert!(!limits.allow(None, Category::PlayerSelection, now + MINUTE * minute));
         }
-        assert!(!limits.allow(None, Category::PlayerSelection, now + MINUTE * 4));
-        assert!(limits.allow(None, Category::PublicWrite, now + MINUTE * 4));
+        assert!(!limits.allow(None, Category::PlayerSelection, now + MINUTE * 2));
+        assert!(limits.allow(None, Category::PublicWrite, now + MINUTE * 2));
         assert!(limits.allow(None, Category::PlayerSelection, now + HOUR));
+    }
+
+    #[test]
+    fn booking_limits_expire() {
+        let limits = RateLimits::default();
+        let now = Instant::now();
+        for minute in 0..2 {
+            for _ in 0..10 {
+                assert!(limits.allow(None, Category::PublicWrite, now + MINUTE * minute));
+            }
+            assert!(!limits.allow(None, Category::PublicWrite, now + MINUTE * minute));
+        }
+        assert!(!limits.allow(None, Category::PublicWrite, now + MINUTE * 2));
+        assert!(limits.allow(None, Category::PublicWrite, now + HOUR));
     }
 }

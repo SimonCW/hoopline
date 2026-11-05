@@ -106,8 +106,8 @@ HTMX sends the rendered member ID in `X-Hoopline-User`. The extractor checks thi
 Anyone can select a player name; this is not authentication and does not prevent impersonation.
 
 The app limits POST requests per connection IP: admin login allows 5 per minute and
-20 per hour; player selection allows 10 per minute and 40 per hour; sign-up and
-cancellation share a limit of 30 per minute and 200 per hour. A rejected request returns HTTP 429. Limits are held in
+20 per hour; player selection allows 5 per minute and 10 per hour; sign-up and
+cancellation share a limit of 10 per minute and 20 per hour. A rejected request returns HTTP 429. Limits are held in
 memory and reset on restart; each app instance has its own limits.
 
 The app uses the direct peer address and does not trust forwarded IP headers. If

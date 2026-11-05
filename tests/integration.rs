@@ -75,7 +75,7 @@ async fn public_writes_and_admin_login_have_separate_limits() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     assert!(response_body_string(response).await.contains("Please wait"));
-    for _ in 0..10 {
+    for _ in 0..5 {
         let response = app
             .clone()
             .oneshot(
@@ -101,7 +101,7 @@ async fn public_writes_and_admin_login_have_separate_limits() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
-    for _ in 0..30 {
+    for _ in 0..10 {
         let response = app
             .clone()
             .oneshot(
@@ -1996,7 +1996,6 @@ async fn typed_name_without_an_explicit_selection_cannot_choose_an_account() {
         .execute(&pool)
         .await
         .unwrap();
-    let app = app_with_pool(pool);
     for form in [
         "existing_user_name=Ben",
         "existing_user_name=ben",
@@ -2006,8 +2005,7 @@ async fn typed_name_without_an_explicit_selection_cannot_choose_an_account() {
         "new_user_name=ben",
         "new_user_name=BEN",
     ] {
-        let response = app
-            .clone()
+        let response = app_with_pool(pool.clone())
             .oneshot(
                 Request::builder()
                     .method("POST")
