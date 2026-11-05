@@ -20,8 +20,11 @@ async fn run() -> Result<(), String> {
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
         .map_err(|error| format!("failed to bind listener: {error}"))?;
-    axum::serve(listener, app)
-        .await
-        .map_err(|error| format!("server crashed: {error}"))?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .map_err(|error| format!("server crashed: {error}"))?;
     Ok(())
 }

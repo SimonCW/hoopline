@@ -100,6 +100,22 @@ The app serves its CSS locally. Booking controls need JavaScript and the pinned 
 
 HTMX sends the rendered member ID in `X-Hoopline-User`. The extractor checks this numeric ID against the current cookie and database record before the handler runs. Missing or mismatched IDs return HTTP 409 with a refresh instruction. This prevents stale-page mistakes; it is not authentication. Direct API clients must send the same header with booking actions.
 
+## Public access and abuse limits
+
+`robots.txt` asks search engines not to index the site. It does not prevent access.
+Anyone can select a player name; this is not authentication and does not prevent impersonation.
+
+The app limits POST requests per connection IP: admin login allows 5 per minute and
+20 per hour; player selection allows 10 per minute and 40 per hour; sign-up and
+cancellation share a limit of 30 per minute and 200 per hour. A rejected request returns HTTP 429. Limits are held in
+memory and reset on restart; each app instance has its own limits.
+
+The app uses the direct peer address and does not trust forwarded IP headers. If
+Hostim or another proxy connects to the app, all users behind it may share one
+limit. Configure per-client rate limits at a trusted proxy or edge in that case.
+Do not expose the app directly if edge protections are required. These limits do
+not stop distributed attacks.
+
 ## SQLite in production (Hostim)
 
 For production, mount a Hostim volume at `/data` and store SQLite there:

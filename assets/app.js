@@ -99,6 +99,10 @@
         });
     });
     body.addEventListener("htmx:responseError", (event) => {
+        if (event.detail.xhr.status === 429) {
+            showError(event.detail.elt, "Too many requests. Please wait and try again.");
+            return;
+        }
         const doc = new DOMParser().parseFromString(event.detail.xhr.responseText, "text/html");
         showError(event.detail.elt, doc.querySelector("main p")?.textContent?.trim() || "Request failed. Refresh and check your booking before trying again.");
     });
