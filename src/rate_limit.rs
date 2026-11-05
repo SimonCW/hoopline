@@ -103,7 +103,6 @@ pub(crate) async fn limit_writes(
             .and_then(|value| value.rsplit(',').next())
             .and_then(|value| value.trim().parse::<IpAddr>().ok())
             .or(peer_ip);
-        eprintln!("rate limit client network: {}", masked_ip(ip));
         if !limits.allow(ip, category, Instant::now()) {
             return (
                 StatusCode::TOO_MANY_REQUESTS,
@@ -115,36 +114,9 @@ pub(crate) async fn limit_writes(
     next.run(request).await
 }
 
-fn masked_ip(ip: Option<IpAddr>) -> String {
-    match ip {
-        Some(IpAddr::V4(ip)) => {
-            let [a, b, c, _] = ip.octets();
-            format!("{a}.{b}.{c}.***")
-        }
-        Some(IpAddr::V6(ip)) => {
-            let segments = ip.segments();
-            format!("{:x}:{:x}:{:x}:***", segments[0], segments[1], segments[2])
-        }
-        None => "unknown".to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn masks_client_addresses() {
-        assert_eq!(
-            masked_ip(Some("192.0.2.123".parse().unwrap())),
-            "192.0.2.***"
-        );
-        assert_eq!(
-            masked_ip(Some("2001:db8:1234:5678::1".parse().unwrap())),
-            "2001:db8:1234:***"
-        );
-        assert_eq!(masked_ip(None), "unknown");
-    }
 
     #[test]
     fn limits_are_separate_and_expire() {
