@@ -136,3 +136,11 @@
     document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
     window.addEventListener("pageshow", event => { if (event.persisted) refresh(); });
 })();
+const themeSelect = document.getElementById('theme-select');
+if (themeSelect) {
+    themeSelect.value = document.documentElement.dataset.theme || 'light';
+    themeSelect.addEventListener('change', () => {
+        document.documentElement.dataset.theme = themeSelect.value;
+        try { localStorage.setItem('hoopline-theme', themeSelect.value); } catch (_) { /* Keep the selection for this page. */ }
+    });
+}

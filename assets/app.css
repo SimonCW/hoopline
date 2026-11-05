@@ -2,7 +2,7 @@
     color-scheme: light;
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     color: #182526;
-    background: #f3f5f3;
+    background: var(--page-background, #f3f5f3);
     line-height: 1.5;
     --muted: #526363;
     --accent: #12604d;
@@ -114,3 +114,70 @@ footer { color: var(--muted); text-align: center; font-size: .8rem; padding: 2re
 @media (min-width: 60rem) {
     .slot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
 }
+
+/* The photographs stay behind opaque cards, so game details remain easy to read. */
+:root { --page-background: #f3f5f3; }
+:root[data-theme="dark"] { --page-background: #182328; }
+:root[data-theme="rockets"] { --page-background: #42151c; --accent: #a11d31; }
+:root[data-theme="bulls"] { --page-background: #351317; --accent: #a21b2e; }
+:root[data-theme="germany"] { --page-background: #292820; --accent: #8d2a1b; }
+:root[data-theme="dirk"] { --page-background: #10243c; --accent: #164b7b; }
+:root[data-theme="bird"] { --page-background: #102b20; --accent: #12604d; }
+:root[data-theme="alba"] { --page-background: #10243c; --accent: #164b7b; }
+:root[data-theme="knicks"] { --page-background: #14243c; --accent: #97420d; }
+body { min-height: 100vh; }
+:root[data-theme="rockets"] body, :root[data-theme="bulls"] body,
+:root[data-theme="germany"] body, :root[data-theme="dirk"] body, :root[data-theme="bird"] body,
+:root[data-theme="alba"] body, :root[data-theme="knicks"] body {
+    background-position: center top;
+    background-size: cover;
+    background-attachment: fixed;
+}
+:root[data-theme="rockets"] body { position: relative; isolation: isolate; background: #42151c; }
+:root[data-theme="rockets"] body::before {
+    content: "";
+    position: fixed;
+    inset: 0 0 0 20%;
+    z-index: -1;
+    background: linear-gradient(120deg, rgba(40, 7, 13, .68), rgba(40, 7, 13, .78)), url('/assets/wallpaper/rockets.webp') left center / auto 100% no-repeat;
+    -webkit-mask-image: linear-gradient(to right, transparent, black 35%);
+    mask-image: linear-gradient(to right, transparent, black 35%);
+    pointer-events: none;
+}
+:root[data-theme="bulls"] body { background-image: linear-gradient(120deg, rgba(48, 8, 13, .78), rgba(48, 8, 13, .60)), url('/assets/wallpaper/bulls.webp'); background-position: center, right center; }
+:root[data-theme="germany"] body { background-image: linear-gradient(120deg, rgba(26, 26, 24, .78), rgba(50, 27, 10, .65)), url('/assets/wallpaper/germany.webp'); background-position: center, right center; background-repeat: no-repeat; }
+:root[data-theme="dirk"] body { background-image: linear-gradient(120deg, rgba(4, 20, 38, .80), rgba(4, 20, 38, .64)), url('/assets/wallpaper/dirk_nowitzki_2011_retro.webp'); background-position: center, right center; }
+:root[data-theme="bird"] body { background-image: linear-gradient(120deg, rgba(2, 25, 15, .80), rgba(2, 25, 15, .64)), url('/assets/wallpaper/larry_bird_dark_graphic_novel.webp'); background-position: center, right center; }
+:root[data-theme="alba"] body { background-image: linear-gradient(120deg, rgba(4, 20, 38, .80), rgba(4, 20, 38, .64)), url('/assets/wallpaper/alba_berlin_2026_yellow_blue.webp'); background-position: center, right center; }
+:root[data-theme="knicks"] body { background-image: linear-gradient(120deg, rgba(4, 20, 38, .80), rgba(4, 20, 38, .64)), url('/assets/wallpaper/knicks_2026_champions.webp'); background-position: center, right center; }
+:root:is([data-theme="dark"], [data-theme="rockets"], [data-theme="bulls"], [data-theme="germany"], [data-theme="dirk"], [data-theme="bird"], [data-theme="alba"], [data-theme="knicks"]) .app-shell { color: #fff; }
+:root:is([data-theme="dark"], [data-theme="rockets"], [data-theme="bulls"], [data-theme="germany"], [data-theme="dirk"], [data-theme="bird"], [data-theme="alba"], [data-theme="knicks"]) :is(footer, .member-greeting, .booking-help, .week-heading) { color: #fff; }
+:root:is([data-theme="dark"], [data-theme="rockets"], [data-theme="bulls"], [data-theme="germany"], [data-theme="dirk"], [data-theme="bird"], [data-theme="alba"], [data-theme="knicks"]) footer a { color: #fff; }
+.card { color: #182526; }
+.btn-primary:hover { background: var(--accent); filter: brightness(.8); }
+.theme-picker { display: grid; gap: .35rem; max-width: 18rem; margin: 0 auto 1.5rem; text-align: left; }
+.theme-picker label { font-weight: 700; }
+.theme-picker select { color: #182526; }
+.photo-credits { display: none; max-width: 40rem; margin: .5rem auto 0; }
+:root[data-theme="rockets"] [data-credits="rockets"],
+:root[data-theme="bulls"] [data-credits="bulls"],
+:root[data-theme="germany"] [data-credits="germany"],
+:root[data-theme="dirk"] [data-credits="dirk"],
+:root[data-theme="bird"] [data-credits="bird"],
+:root[data-theme="alba"] [data-credits="alba"],
+:root[data-theme="knicks"] [data-credits="knicks"] { display: block; }
+.photo-credits p { margin-bottom: .6rem; }
+
+/* Dark surfaces use light text; status badges retain their own light backgrounds. */
+:root[data-theme="dark"] { --accent: #79d6b7; --muted: #b8cac4; }
+:root[data-theme="dark"] .card { background: #243338; border-color: #485c5c; color: #f2f7f4; }
+:root[data-theme="dark"] :is(input, select, .member-matches, .btn) { background: #304247; border-color: #819894; color: #f2f7f4; }
+:root[data-theme="dark"] .btn-primary { background: #79d6b7; border-color: #79d6b7; color: #102922; }
+:root[data-theme="dark"] .btn:hover { filter: brightness(1.15); }
+:root[data-theme="dark"] .btn:disabled { background: #38494a; color: #b8cac4; }
+:root[data-theme="dark"] .booking-status:not(.is-booked) { color: #182526; }
+:root[data-theme="dark"] .availability strong { color: #f2f7f4; }
+:root[data-theme="dark"] :is(.roster, .admin-tools, .roster-list li) { border-color: #485c5c; }
+:root[data-theme="dark"] :focus-visible { outline-color: #a9e6d1; }
+:root[data-theme="dark"] .skip-link:focus { background: #243338; color: #f2f7f4; }
+:root[data-theme="alba"] :is(:focus-visible, [tabindex="-1"]:focus) { outline: 3px solid #fff; outline-offset: 3px; box-shadow: 0 0 0 7px #10243c; }

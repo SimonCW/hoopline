@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const port = process.env.PLAYWRIGHT_PORT || '5051';
+
 export default defineConfig({
   testDir: './tests/browser',
   testIgnore: '**/admin.spec.js',
@@ -7,7 +9,7 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   use: {
-    baseURL: 'http://127.0.0.1:5051',
+    baseURL: `http://127.0.0.1:${port}`,
     trace: 'retain-on-failure',
   },
   projects: [
@@ -16,8 +18,8 @@ export default defineConfig({
   ],
   webServer: {
     command: 'cargo run --locked',
-    env: { DATABASE_URL: 'sqlite::memory:', PORT: '5051' },
-    url: 'http://127.0.0.1:5051/healthz',
+    env: { DATABASE_URL: 'sqlite::memory:', PORT: port },
+    url: `http://127.0.0.1:${port}/healthz`,
     reuseExistingServer: false,
     timeout: 120_000,
   },

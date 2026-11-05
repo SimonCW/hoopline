@@ -250,6 +250,25 @@ pub fn app_with_pool(pool: SqlitePool) -> Router {
         .route("/assets/app.css", get(app_css))
         .route("/assets/app.js", get(app_js))
         .route("/assets/name-search.js", get(name_search_js))
+        .route("/assets/wallpaper/rockets.webp", get(rockets_wallpaper))
+        .route("/assets/wallpaper/bulls.webp", get(bulls_wallpaper))
+        .route("/assets/wallpaper/germany.webp", get(germany_wallpaper))
+        .route(
+            "/assets/wallpaper/dirk_nowitzki_2011_retro.webp",
+            get(dirk_wallpaper),
+        )
+        .route(
+            "/assets/wallpaper/larry_bird_dark_graphic_novel.webp",
+            get(bird_wallpaper),
+        )
+        .route(
+            "/assets/wallpaper/alba_berlin_2026_yellow_blue.webp",
+            get(alba_wallpaper),
+        )
+        .route(
+            "/assets/wallpaper/knicks_2026_champions.webp",
+            get(knicks_wallpaper),
+        )
         .route(
             "/favicon.ico",
             get(|| async { axum::http::StatusCode::NO_CONTENT }),
@@ -876,6 +895,55 @@ async fn name_search_js() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         include_str!("../assets/name-search.js"),
+    )
+}
+
+async fn rockets_wallpaper() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/webp")],
+        include_bytes!("../assets/wallpaper/rockets.webp").as_slice(),
+    )
+}
+
+async fn bulls_wallpaper() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/webp")],
+        include_bytes!("../assets/wallpaper/bulls.webp").as_slice(),
+    )
+}
+
+async fn germany_wallpaper() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/webp")],
+        include_bytes!("../assets/wallpaper/germany.webp").as_slice(),
+    )
+}
+
+async fn dirk_wallpaper() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/webp")],
+        include_bytes!("../assets/wallpaper/dirk_nowitzki_2011_retro.webp").as_slice(),
+    )
+}
+
+async fn bird_wallpaper() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/webp")],
+        include_bytes!("../assets/wallpaper/larry_bird_dark_graphic_novel.webp").as_slice(),
+    )
+}
+
+async fn alba_wallpaper() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/webp")],
+        include_bytes!("../assets/wallpaper/alba_berlin_2026_yellow_blue.webp").as_slice(),
+    )
+}
+
+async fn knicks_wallpaper() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/webp")],
+        include_bytes!("../assets/wallpaper/knicks_2026_champions.webp").as_slice(),
     )
 }
 

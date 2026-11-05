@@ -27,6 +27,31 @@ async fn test_pool() -> sqlx::SqlitePool {
     pool
 }
 
+#[tokio::test]
+async fn wallpapers_are_served_as_webp() {
+    let app = app_with_pool(test_pool().await);
+    for path in [
+        "/assets/wallpaper/rockets.webp",
+        "/assets/wallpaper/bulls.webp",
+        "/assets/wallpaper/germany.webp",
+        "/assets/wallpaper/dirk_nowitzki_2011_retro.webp",
+        "/assets/wallpaper/larry_bird_dark_graphic_novel.webp",
+        "/assets/wallpaper/alba_berlin_2026_yellow_blue.webp",
+        "/assets/wallpaper/knicks_2026_champions.webp",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "image/webp");
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(bytes.starts_with(b"RIFF"));
+        assert_eq!(&bytes[8..12], b"WEBP");
+    }
+}
+
 async fn insert_waitlist_booking(
     pool: &sqlx::SqlitePool,
     slot_id: i64,

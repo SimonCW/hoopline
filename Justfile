@@ -37,6 +37,10 @@ stop-dev:
 preview: stop-dev
   ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin}" DATABASE_URL=sqlite::memory: PREVIEW_SAMPLE=1 PORT=5050 cargo run
 
+# Rebuild and restart the disposable preview when source files change.
+dev: stop-dev
+  ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin}" DATABASE_URL=sqlite::memory: PREVIEW_SAMPLE=1 PORT=5050 bacon run
+
 healthcheck db_mode="memory":
   db_mode="{{db_mode}}"; \
   if [ "$db_mode" = "file" ]; then \

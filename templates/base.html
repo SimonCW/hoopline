@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="htmx-config" content='{"includeIndicatorStyles": false, "timeout": 15000}'>
     <title>{% block title %}{{ title }}{% endblock %}</title>
+    <script>
+        try {
+            const theme = localStorage.getItem('hoopline-theme');
+            if (['light', 'dark', 'rockets', 'bulls', 'germany', 'dirk', 'bird', 'alba', 'knicks'].includes(theme)) document.documentElement.dataset.theme = theme;
+        } catch (_) { /* The default theme also works without storage. */ }
+    </script>
     <link href="/assets/app.css" rel="stylesheet">
     <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.8/dist/htmx.min.js"></script>
     <script defer src="/assets/app.js"></script>
@@ -18,7 +24,37 @@
         <p id="booking-request-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true" hidden></p>
         <noscript><p class="request-error">Enable JavaScript to select your name and manage bookings.</p></noscript>
         {% block content %}{% endblock %}
-        <footer>Hoopline · Fair queues. More basketball.</footer>
+        <footer>
+            <div class="theme-picker">
+                <label for="theme-select">Choose a theme</label>
+                <select id="theme-select">
+                    <option value="light">Simple light</option>
+                    <option value="dark">Simple dark</option>
+                    <option value="rockets">Houston · 2005</option>
+                    <option value="bulls">Chicago · 1995–96</option>
+                    <option value="germany">Deutschland · 2025</option>
+                    <option value="dirk">Dirk · 2011</option>
+                    <option value="bird">Larry Bird · Boston</option>
+                    <option value="alba">ALBA Berlin · 2026</option>
+                    <option value="knicks">New York · 2026</option>
+                </select>
+            </div>
+            <p>Hoopline · Fair queues. More basketball.</p>
+            <details class="photo-credits" data-credits="rockets"><summary>Photo credits</summary>
+                <p>The Houston wallpaper is AI-generated. Previously shared reference photos: <a href="https://commons.wikimedia.org/wiki/File:Yao_Ming_Houston_Rockets_2006-03-29.jpg">Yao Ming by keithjj</a> and <a href="https://commons.wikimedia.org/wiki/File:Tracy_McGrady_2008-02-13.jpg">Tracy McGrady by keithjj</a> (<a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0</a>); <a href="https://commons.wikimedia.org/wiki/File:Dikembe_Mutombo_(2006-12-10).jpg">Dikembe Mutombo by Keith Allison</a> (<a href="https://creativecommons.org/licenses/by-sa/2.0/">CC BY-SA 2.0</a>).</p>
+            </details>
+            <details class="photo-credits" data-credits="bulls"><summary>Photo credits</summary>
+                <p>The Chicago wallpaper is AI-generated. Previously shared reference photos: <a href="https://commons.wikimedia.org/wiki/File:Jordan_Lipofsky.jpg">Michael Jordan</a> and <a href="https://commons.wikimedia.org/wiki/File:Lipofsky_Pippen.jpg">Scottie Pippen</a> by Steve Lipofsky (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>); <a href="https://commons.wikimedia.org/wiki/File:Scottie_Pippen,_Chicago_Bulls_at_the_Meadowlands_Sports_Complex,_NJ,_US.jpg">Scottie Pippen by The Eloquent Peasant</a> (<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>).</p>
+            </details>
+            <details class="photo-credits" data-credits="germany"><summary>Photo credits</summary>
+                <p>This AI-generated wallpaper is an artistic interpretation, not a photograph of the 2025 final. It is faded and tinted for this theme.</p>
+                <p>Reference photos identified by the creator: <a href="https://commons.wikimedia.org/wiki/File:Dennis_Schr%C3%B6der_(51688300419).jpg">Dennis Schröder by Erik Drost</a> (<a href="https://creativecommons.org/licenses/by/2.0/">CC BY 2.0</a>); <a href="https://commons.wikimedia.org/wiki/File:Franz_Wagner_(basketball).jpg">Franz Wagner by Sven Mandel</a> (<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>); <a href="https://commons.wikimedia.org/wiki/File:Isaac_Bonga_17_KK_Partisan_EuroLeague_20241101_(5).jpg">Isaac Bonga by Zafer</a> (<a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>).</p>
+            </details>
+            <details class="photo-credits" data-credits="dirk"><summary>Image credits</summary><p>AI-generated illustration, faded and tinted. No Creative Commons license has been established. Team branding and player likenesses may have separate rights.</p></details>
+            <details class="photo-credits" data-credits="bird"><summary>Image credits</summary><p>AI-generated illustration, faded and tinted. No Creative Commons license has been established. Team branding and player likenesses may have separate rights.</p></details>
+            <details class="photo-credits" data-credits="alba"><summary>Image credits</summary><p>AI-generated illustration, faded and tinted; it is not a documentary photograph. No Creative Commons license has been established. Team branding and player likenesses may have separate rights.</p></details>
+            <details class="photo-credits" data-credits="knicks"><summary>Image credits</summary><p>AI-generated illustration, faded and tinted; it is not a documentary photograph. No Creative Commons license has been established. Team branding and player likenesses may have separate rights.</p></details>
+        </footer>
     </main>
 </body>
 </html>

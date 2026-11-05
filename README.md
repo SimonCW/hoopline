@@ -34,6 +34,17 @@ Run `just stop-dev` to stop that server without starting a new one.
 The `just preview` and `just healthcheck` commands use `admin` as the local
 admin password unless `ADMIN_PASSWORD` is already set.
 
+For a development preview that rebuilds and restarts when source, templates,
+assets, or migrations change, install Bacon (`brew install bacon`) and run:
+
+```sh
+just dev
+```
+
+Open <http://localhost:5050>. Refresh the browser after Bacon restarts the
+server. This preview uses an in-memory database, so changes reset on restart.
+Press `q` in Bacon to stop it.
+
 ### Member booking behavior
 
 - Games remain visible through their Berlin calendar day. Signups close when a game starts.

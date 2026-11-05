@@ -2,6 +2,39 @@ import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import AxeBuilder from '@axe-core/playwright';
 
+test('nine themes persist across navigation and remain accessible', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto('/');
+  const picker = page.getByLabel('Choose a theme');
+  await expect(picker.locator('option')).toHaveCount(9);
+  for (const theme of ['light', 'dark', 'rockets', 'bulls', 'dirk', 'bird', 'alba', 'knicks', 'germany']) {
+    await picker.selectOption(theme);
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    const credits = page.locator('.photo-credits:visible');
+    if (['light', 'dark'].includes(theme)) {
+      await expect(credits).toHaveCount(0);
+    } else {
+      await expect(credits).toHaveCount(1);
+      await expect(credits).toHaveAttribute('data-credits', theme);
+    }
+    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
+    expect(results.violations).toEqual([]);
+  }
+  await page.reload();
+  await expect(picker).toHaveValue('germany');
+  await page.locator('#new-member > summary').click();
+  await page.getByLabel('New member name', { exact: true }).fill(`Theme ${randomUUID().slice(0, 8)}`);
+  await page.getByRole('button', { name: 'Create and continue' }).click();
+  await expect(page).toHaveURL(/\/slots$/);
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'germany');
+  await expect(picker).toHaveValue('germany');
+  for (const theme of ['light', 'dark', 'rockets', 'bulls', 'dirk', 'bird', 'alba', 'knicks', 'germany']) {
+    await picker.selectOption(theme);
+    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
+    expect(results.violations).toEqual([]);
+  }
+});
+
 async function createMember(page) {
   const name = `Member ${randomUUID().slice(0, 8)}`;
   await page.goto('/');
@@ -27,7 +60,7 @@ async function overviewLayout(page) {
 
 test('compact cards, remembered identity, signup and safe cancellation', async ({ page }) => {
   await createMember(page);
-  await expect(page.getByRole('combobox')).toHaveCount(0);
+  await expect(page.getByRole('combobox', { name: 'Your name' })).toHaveCount(0);
   const card = page.getByTestId('slot-card').first();
   await expect(card.locator('.roster')).not.toHaveAttribute('open', '');
   await card.getByRole('button', { name: 'Sign Up', exact: true }).click();
@@ -68,10 +101,10 @@ test('phone widths, long names, touch targets and keyboard selection', async ({ 
   await expect(page.getByTestId('slot-card')).toHaveCount(0);
   await page.getByRole('combobox', { name: 'Your name' }).fill('Bne');
   await expect(page.getByRole('option', { name: 'Ben', exact: true })).toBeVisible();
-  await page.getByRole('combobox').press('ArrowDown');
-  await page.getByRole('combobox').press('Enter');
-  await expect(page.getByRole('combobox')).toHaveValue('Ben');
-  await page.getByRole('combobox').press('Tab');
+  await page.getByRole('combobox', { name: 'Your name' }).press('ArrowDown');
+  await page.getByRole('combobox', { name: 'Your name' }).press('Enter');
+  await expect(page.getByRole('combobox', { name: 'Your name' })).toHaveValue('Ben');
+  await page.getByRole('combobox', { name: 'Your name' }).press('Tab');
   await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.locator('.identity-name')).toHaveText('Ben');
@@ -79,7 +112,7 @@ test('phone widths, long names, touch targets and keyboard selection', async ({ 
   await page.locator('#new-member > summary').click();
   await page.getByLabel('New member name', { exact: true }).fill(`Long${'name'.repeat(13)}${randomUUID().slice(0, 8)}`);
   await page.getByRole('button', { name: 'Create and continue' }).click();
-  await expect(page.getByRole('combobox')).toHaveCount(0);
+  await expect(page.getByRole('combobox', { name: 'Your name' })).toHaveCount(0);
   for (const width of [320, 390, 430]) {
     await page.setViewportSize({ width, height: 844 });
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -194,7 +227,7 @@ test('waitlist status updates after automatic promotion', async ({ page, request
 test('member forms and expanded rosters pass automated accessibility checks', async ({ page }) => {
   await page.goto('/');
   await page.locator('#new-member > summary').click();
-  await page.getByRole('combobox').fill('Jmli');
+  await page.getByRole('combobox', { name: 'Your name' }).fill('Jmli');
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze();
@@ -245,9 +278,9 @@ test('a focus refresh during an older response is not lost', async ({ page }) =>
 
 test('focus refresh does not erase a name being typed', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('combobox').fill('Jam');
+  await page.getByRole('combobox', { name: 'Your name' }).fill('Jam');
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(page.getByRole('combobox')).toHaveValue('Jam');
+  await expect(page.getByRole('combobox', { name: 'Your name' })).toHaveValue('Jam');
   await expect(page.getByRole('option', { name: 'Jamali', exact: true })).toBeVisible();
 });
 
@@ -273,15 +306,15 @@ test('failed cancellation keeps the booking and hides old success feedback', asy
 
 test('fuzzy search allows explicit pointer selection and does not guess a user', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('combobox').fill('Jmli');
+  await page.getByRole('combobox', { name: 'Your name' }).fill('Jmli');
   await expect(page.getByRole('option', { name: 'Jamali', exact: true })).toBeVisible();
   await expect(page.getByTestId('slot-card')).toHaveCount(0);
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.locator('#name-step').getByRole('alert')).toContainText('Choose your name from the list');
   await expect(page.getByTestId('slot-card')).toHaveCount(0);
-  await page.getByRole('combobox').focus();
+  await page.getByRole('combobox', { name: 'Your name' }).focus();
   await page.getByRole('option', { name: 'Jamali', exact: true }).click();
-  await expect(page.getByRole('combobox')).toHaveValue('Jamali');
+  await expect(page.getByRole('combobox', { name: 'Your name' })).toHaveValue('Jamali');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.locator('.identity-name')).toHaveText('Jamali');
   await expect(page.getByTestId('slot-card').first()).toBeVisible();
@@ -300,14 +333,14 @@ test('cookie remembers a member until logout, without cancelling their booking',
   await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
   await page.goto('/');
   await expect(page.locator('.identity-name')).toHaveText(name);
-  await expect(page.getByRole('combobox')).toHaveCount(0);
+  await expect(page.getByRole('combobox', { name: 'Your name' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Log out' }).click();
-  await expect(page.getByRole('combobox')).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Your name' })).toBeVisible();
   await expect(page.getByTestId('slot-card')).toHaveCount(0);
   expect((await page.context().cookies()).find(cookie => cookie.name === 'user_id')).toBeUndefined();
   await page.goto('/slots');
   await expect(page.getByTestId('slot-card')).toHaveCount(0);
-  await page.getByRole('combobox').fill(name);
+  await page.getByRole('combobox', { name: 'Your name' }).fill(name);
   await page.getByRole('option', { name, exact: true }).click();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
@@ -323,7 +356,7 @@ test('logout in another tab returns the overview to name selection on focus', as
   await otherTab.getByRole('button', { name: 'Log out' }).click();
   await page.bringToFront();
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(page.getByRole('combobox')).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Your name' })).toBeVisible();
   await expect(page.getByTestId('slot-card')).toHaveCount(0);
   await otherTab.close();
 });
@@ -400,18 +433,18 @@ test('a failed booking releases the shared controls on every card', async ({ pag
 
 test('name selection submits the selected ID and editing clears it', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('combobox').fill('Ben');
+  await page.getByRole('combobox', { name: 'Your name' }).fill('Ben');
   await page.getByRole('option', { name: 'Ben', exact: true }).click();
   const selected = page.locator('#selected-user-id');
   await expect(selected).toHaveValue('2');
   await expect(selected).toBeEnabled();
-  await page.getByRole('combobox').fill('Alex');
+  await page.getByRole('combobox', { name: 'Your name' }).fill('Alex');
   await expect(selected).toBeDisabled();
   await expect(selected).toHaveValue('');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.locator('#name-step').getByRole('alert')).toContainText('Choose your name from the list');
   await expect(page.getByTestId('slot-card')).toHaveCount(0);
-  await page.getByRole('combobox').focus();
+  await page.getByRole('combobox', { name: 'Your name' }).focus();
   await page.getByRole('option', { name: 'Alex', exact: true }).click();
   const request = page.waitForRequest(request => request.url().endsWith('/users/select') && request.method() === 'POST');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
