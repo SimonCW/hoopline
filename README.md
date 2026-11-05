@@ -27,9 +27,10 @@ just preview
 
 This stops this checkout's dev server on port 5050 before starting the preview.
 New databases start with no players or bookings. Recurring schedules still
-create games. Set `PREVIEW_SAMPLE=1` with `DATABASE_URL=sqlite::memory:` to
-add a sample roster to the first upcoming game. Preview data is limited to
-in-memory databases and is not added to existing file databases.
+create games. Set `PREVIEW_SAMPLE=1` to add a sample roster to the first
+upcoming game, including when using a file database. The app adds it only once,
+and only if the database has no players or bookings. It keeps the sample data
+in a file database after a restart, even if `PREVIEW_SAMPLE` is later removed.
 Run `just stop-dev` to stop that server without starting a new one.
 The `just preview` and `just healthcheck` commands use `admin` as the local
 admin password unless `ADMIN_PASSWORD` is already set.

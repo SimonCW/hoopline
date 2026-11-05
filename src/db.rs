@@ -324,12 +324,20 @@ pub async fn create_upcoming_slots(
     Ok(report.created)
 }
 
-/// Adds a full example roster to a disposable preview database.
+/// Adds a full example roster once to an empty preview database.
 ///
 /// # Errors
 /// Returns an error if the example data cannot be written.
 pub(crate) async fn seed_preview_roster(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let occupied: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM preview_seed) OR EXISTS(SELECT 1 FROM users) OR EXISTS(SELECT 1 FROM bookings)",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if occupied {
+        return Ok(());
+    }
     let slot_id: Option<i64> = sqlx::query_scalar(
         "SELECT id FROM slots WHERE schedule_id IS NOT NULL AND julianday(datetime) > julianday(?) ORDER BY julianday(datetime) LIMIT 1",
     )
@@ -379,6 +387,9 @@ pub(crate) async fn seed_preview_roster(pool: &SqlitePool) -> Result<(), sqlx::E
         .execute(&mut *tx)
         .await?;
     }
+    sqlx::query("INSERT INTO preview_seed (id) VALUES (1)")
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -1126,6 +1137,56 @@ mod tests {
         )
         .fetch_one(&pool).await.unwrap();
         assert_eq!(row, (15, 3));
+    }
+
+    #[tokio::test]
+    async fn file_preview_survives_restart_and_is_only_seeded_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let url = format!("sqlite://{}", dir.path().join("preview.db").display());
+        let pool = init_pool(&url).await.unwrap();
+        create_upcoming_slots(&pool, Utc::now()).await.unwrap();
+        seed_preview_roster(&pool).await.unwrap();
+        pool.close().await;
+
+        let pool = init_pool(&url).await.unwrap();
+        seed_preview_roster(&pool).await.unwrap();
+        let counts: (i64, i64) =
+            sqlx::query_as("SELECT (SELECT count(*) FROM users), (SELECT count(*) FROM bookings)")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(counts, (18, 18));
+        sqlx::query("DELETE FROM bookings")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM users")
+            .execute(&pool)
+            .await
+            .unwrap();
+        seed_preview_roster(&pool).await.unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn preview_does_not_modify_existing_players() {
+        let pool = init_pool("sqlite::memory:").await.unwrap();
+        create_upcoming_slots(&pool, Utc::now()).await.unwrap();
+        sqlx::query("INSERT INTO users (name) VALUES ('Existing player')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        seed_preview_roster(&pool).await.unwrap();
+        let counts: (i64, i64) =
+            sqlx::query_as("SELECT (SELECT count(*) FROM users), (SELECT count(*) FROM bookings)")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(counts, (1, 0));
     }
 
     #[tokio::test]

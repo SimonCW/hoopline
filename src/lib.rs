@@ -188,7 +188,7 @@ pub async fn app() -> Result<Router, AppError> {
     }
     let pool = db::init_pool(&database_url).await?;
     create_upcoming_slots(&pool, Utc::now()).await?;
-    if database_url == "sqlite::memory:" && std::env::var("PREVIEW_SAMPLE").as_deref() == Ok("1") {
+    if std::env::var("PREVIEW_SAMPLE").as_deref() == Ok("1") {
         db::seed_preview_roster(&pool).await?;
     }
     let renewal_pool = pool.clone();
