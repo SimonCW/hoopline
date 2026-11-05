@@ -1,4 +1,4 @@
-//! Limits public write requests by connection address.
+//! Limits public write requests by forwarded or connection address.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -90,12 +90,19 @@ pub(crate) async fn limit_writes(
         None
     };
     if let Some(category) = category {
-        let ip = request
+        let peer_ip = request
             .extensions()
             .get::<ConnectInfo<SocketAddr>>()
             .map(|info| info.0.ip());
-        // Temporary diagnostic: compare peer addresses from different networks.
-        eprintln!("rate limit peer IP: {ip:?}");
+        let ip = request
+            .headers()
+            .get_all("x-forwarded-for")
+            .iter()
+            .next_back()
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.rsplit(',').next())
+            .and_then(|value| value.trim().parse::<IpAddr>().ok())
+            .or(peer_ip);
         if !limits.allow(ip, category, Instant::now()) {
             return (
                 StatusCode::TOO_MANY_REQUESTS,
