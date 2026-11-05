@@ -46,6 +46,82 @@ async fn robots_discourages_indexing() {
 }
 
 #[tokio::test]
+async fn forwarded_clients_have_separate_rate_limits() {
+    let app = app_with_pool(test_pool().await);
+    for _ in 0..5 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/users/select")
+                    .header("x-forwarded-for", "203.0.113.99, 192.0.2.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+    for (header_value, expected_limited) in
+        [("198.51.100.99, 192.0.2.1", true), ("192.0.2.2", false)]
+    {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/users/select")
+                    .header("x-forwarded-for", header_value)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status() == StatusCode::TOO_MANY_REQUESTS,
+            expected_limited
+        );
+    }
+}
+
+#[tokio::test]
+async fn invalid_forwarded_address_falls_back_to_peer() {
+    use axum::extract::ConnectInfo;
+    use std::net::SocketAddr;
+
+    let app = app_with_pool(test_pool().await);
+    for _ in 0..5 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/users/select")
+                    .header("x-forwarded-for", "invalid")
+                    .extension(ConnectInfo("192.0.2.1:1234".parse::<SocketAddr>().unwrap()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/users/select")
+                .extension(ConnectInfo("192.0.2.1:5678".parse::<SocketAddr>().unwrap()))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
 async fn public_writes_and_admin_login_have_separate_limits() {
     let app = app_with_pool(test_pool().await);
     for _ in 0..5 {

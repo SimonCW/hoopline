@@ -110,11 +110,12 @@ The app limits POST requests per connection IP: admin login allows 5 per minute 
 cancellation share a limit of 10 per minute and 20 per hour. A rejected request returns HTTP 429. Limits are held in
 memory and reset on restart; each app instance has its own limits.
 
-The app uses the direct peer address and does not trust forwarded IP headers. If
-Hostim or another proxy connects to the app, all users behind it may share one
-limit. Configure per-client rate limits at a trusted proxy or edge in that case.
-Do not expose the app directly if edge protections are required. These limits do
-not stop distributed attacks.
+The app uses the rightmost address in `X-Forwarded-For`, falling back to the
+direct peer address if it is missing or invalid. This assumes the last proxy
+adds or replaces that address with the actual client IP. Confirm this behavior
+with Hostim, and prevent direct access to the app. Otherwise clients can forge
+the header and bypass the limits. Additional proxies may cause users to share a
+limit. These limits do not stop distributed attacks.
 
 ## SQLite in production (Hostim)
 
