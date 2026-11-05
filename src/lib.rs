@@ -3,6 +3,7 @@ pub mod db;
 pub mod error;
 mod identity;
 pub mod models;
+mod rate_limit;
 pub mod scheduling;
 
 use crate::{
@@ -274,6 +275,10 @@ pub fn app_with_pool(pool: SqlitePool) -> Router {
             get(|| async { axum::http::StatusCode::NO_CONTENT }),
         )
         .with_state(pool)
+        .layer(axum::middleware::from_fn_with_state(
+            rate_limit::RateLimits::default(),
+            rate_limit::limit_writes,
+        ))
         .layer(axum::middleware::map_response(
             |mut response: Response| async move {
                 response
