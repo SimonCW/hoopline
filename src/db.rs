@@ -339,7 +339,7 @@ pub(crate) async fn seed_preview_roster(pool: &SqlitePool) -> Result<(), sqlx::E
         return Ok(());
     }
     let slot_id: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM slots WHERE schedule_id IS NOT NULL AND julianday(datetime) > julianday(?) ORDER BY julianday(datetime) LIMIT 1",
+        "SELECT id FROM slots WHERE julianday(datetime) > julianday(?) ORDER BY julianday(datetime) DESC, id DESC LIMIT 1",
     )
     .bind(Utc::now().to_rfc3339())
     .fetch_optional(&mut *tx)
@@ -1137,6 +1137,26 @@ mod tests {
         )
         .fetch_one(&pool).await.unwrap();
         assert_eq!(row, (15, 3));
+    }
+
+    #[tokio::test]
+    async fn preview_fills_the_farthest_upcoming_game() {
+        let pool = init_pool("sqlite::memory:").await.unwrap();
+        create_upcoming_slots(&pool, Utc::now()).await.unwrap();
+        let future = (Utc::now() + chrono::Duration::days(365)).to_rfc3339();
+        let slot_id: i64 = sqlx::query_scalar(
+            "INSERT INTO slots (datetime, venue) VALUES (?, 'Future court') RETURNING id",
+        )
+        .bind(future)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        seed_preview_roster(&pool).await.unwrap();
+        let booked_slot: i64 = sqlx::query_scalar("SELECT slot_id FROM bookings LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(booked_slot, slot_id);
     }
 
     #[tokio::test]
