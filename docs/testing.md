@@ -38,8 +38,9 @@ pinned and served by the app. Scenario browsers reject external requests.
 `HOOPLINE_TEST_NOW` to set an RFC3339 application time. Production builds omit
 the feature and ignore that variable. Use a normal `cargo build --release` for
 deployment. The fixed time covers game visibility, signup closure, schedule
-release, admin lockout, and session expiry. Rate-limit windows use monotonic
-time and stay enabled. Do not wait for real release or expiry times in tests.
+release, activity timestamps, admin lockout, and session expiry. Rate-limit
+windows use monotonic time and stay enabled. Do not wait for real release or
+expiry times in tests.
 
 Each browser test, including the layout and admin suites, owns a temporary
 SQLite file and an app process.

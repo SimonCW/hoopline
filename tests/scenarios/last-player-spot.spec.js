@@ -1,4 +1,4 @@
-import { test, expect, scenarioSlotId } from './fixtures.js';
+import { test, expect, scenarioNow, scenarioSlotId } from './fixtures.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
 test.use({ seedProfile: 'last-spot' });
@@ -156,8 +156,35 @@ test('two players contest the last spot, cancellation promotes the waiter, and r
   await expectRoster(winner, rejoined);
   await refresh(waiter);
   await expectRoster(waiter, rejoined);
+
+  // The real routes must save the matching history in the same database.
+  const history = await app.query(
+    `SELECT id, kind, actor_name, subject_name, occurred_at, occurred_local_date,
+            slot_local_date, venue, details
+     FROM activity_log WHERE slot_id = ? ORDER BY id`,
+    [scenarioSlotId],
+  );
+  expect(history.map(event => [event.kind, event.actor_name, event.subject_name])).toEqual([
+    ['booking.signed_up', winner.name, winner.name],
+    ['booking.signed_up', waiter.name, waiter.name],
+    ['booking.cancelled', winner.name, winner.name],
+    ['booking.promoted', winner.name, waiter.name],
+    ['booking.signed_up', winner.name, winner.name],
+  ]);
+  for (const event of history) {
+    expect(Date.parse(event.occurred_at)).toBe(Date.parse(scenarioNow));
+    expect(event.occurred_local_date).toBe('2030-01-07');
+    expect(event.slot_local_date).toBe('2030-01-08');
+    expect(event.venue).toBe('Scenario Court');
+    expect(Date.parse(JSON.parse(event.details).booked_at)).toBe(Date.parse(scenarioNow));
+  }
+  const details = history.map(event => JSON.parse(event.details));
+  expect(details[2].booking_id).toBe(details[0].booking_id);
+  expect(details[3].booking_id).toBe(details[1].booking_id);
+  expect(details[3].caused_by_activity_id).toBe(history[2].id);
+  expect(details[4].booking_id).toBeGreaterThan(details[0].booking_id);
   await testInfo.attach('booking-transitions.json', {
-    body: Buffer.from(JSON.stringify({ winner: winner.name, waiter: waiter.name, contested, promoted, rejoined }, null, 2)),
+    body: Buffer.from(JSON.stringify({ winner: winner.name, waiter: waiter.name, contested, promoted, rejoined, history }, null, 2)),
     contentType: 'application/json',
   });
 });

@@ -52,7 +52,7 @@ pub(crate) async fn record_booking(
     tx: &mut Transaction<'_, Sqlite>,
     activity: BookingActivity,
 ) -> Result<i64, sqlx::Error> {
-    record_booking_at(tx, activity, Utc::now()).await
+    record_booking_at(tx, activity, crate::clock::now()).await
 }
 
 async fn record_booking_at(

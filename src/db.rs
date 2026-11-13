@@ -83,12 +83,13 @@ pub(crate) async fn admin_add_member(
         return Err(AppError::BadRequest("The selected list is full.".into()));
     }
     sqlx::query(
-        "INSERT INTO bookings (slot_id, user_id, position, is_waitlist) VALUES (?, ?, ?, ?)",
+        "INSERT INTO bookings (slot_id, user_id, position, is_waitlist, created_at) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(slot_id)
     .bind(user_id)
     .bind(count + 1)
     .bind(is_waitlist)
+    .bind(crate::clock::now().to_rfc3339_opts(SecondsFormat::Micros, true))
     .execute(&mut *tx)
     .await?;
     increment_slot_revision(&mut tx, slot_id).await?;
@@ -640,11 +641,12 @@ pub async fn signup_for_slot(
             .await?;
     if player_count < max_players {
         sqlx::query(
-            "INSERT INTO bookings (slot_id, user_id, position, is_waitlist) VALUES (?, ?, ?, 0)",
+            "INSERT INTO bookings (slot_id, user_id, position, is_waitlist, created_at) VALUES (?, ?, ?, 0, ?)",
         )
         .bind(slot_id)
         .bind(user_id)
         .bind(player_count + 1)
+        .bind(crate::clock::now().to_rfc3339_opts(SecondsFormat::Micros, true))
         .execute(&mut *tx)
         .await?;
         increment_slot_revision(&mut tx, slot_id).await?;
@@ -670,11 +672,12 @@ pub async fn signup_for_slot(
             .await?;
     if waitlist_count < max_waitlist {
         sqlx::query(
-            "INSERT INTO bookings (slot_id, user_id, position, is_waitlist) VALUES (?, ?, ?, 1)",
+            "INSERT INTO bookings (slot_id, user_id, position, is_waitlist, created_at) VALUES (?, ?, ?, 1, ?)",
         )
         .bind(slot_id)
         .bind(user_id)
         .bind(waitlist_count + 1)
+        .bind(crate::clock::now().to_rfc3339_opts(SecondsFormat::Micros, true))
         .execute(&mut *tx)
         .await?;
         increment_slot_revision(&mut tx, slot_id).await?;
