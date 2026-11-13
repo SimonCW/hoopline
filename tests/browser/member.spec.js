@@ -272,7 +272,11 @@ test('fuzzy search allows explicit pointer selection and does not guess a user',
   await page.getByRole('combobox', { name: 'Your name' }).fill('Jmli');
   await expect(page.getByRole('option', { name: 'Jamali', exact: true })).toBeVisible();
   await expect(page.getByTestId('slot-card')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  // Hold the pointer through a frame. Blur must not move Continue before release.
+  await page.getByRole('button', { name: 'Continue', exact: true }).hover();
+  await page.mouse.down();
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+  await page.mouse.up();
   await expect(page.locator('#name-step').getByRole('alert')).toContainText('Choose your name from the list');
   await expect(page.getByTestId('slot-card')).toHaveCount(0);
   await page.getByRole('combobox', { name: 'Your name' }).focus();
