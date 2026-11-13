@@ -85,6 +85,15 @@ failure artifacts and generated regression seeds for seven days.
 The container-build job requires successful verification. It builds the normal
 Docker image without the test-clock feature. It does not publish or deploy it.
 
+Rust dependencies, Cargo's build cache, and the installed Just binary are
+cached with `Swatinem/rust-cache`. Its keys include the toolchain and dependency
+configuration. npm's download cache remains enabled through `setup-node`.
+Docker Buildx caches intermediate layers in GitHub Actions, including
+`cargo-chef` dependency builds. The first run fills each cache; later runs can
+reuse it. GitHub isolates pull-request caches from the default branch.
+All tests still run on every verification. Chromium and its Linux dependencies
+are installed normally; caching them adds little value for this small suite.
+
 Hostim deployment is configured outside this repository. If it deploys directly
 from Git, use a CI gate if the provider supports it. Require the `Verify`
 check before deployment. Otherwise, disable independent auto-deploy and deploy
