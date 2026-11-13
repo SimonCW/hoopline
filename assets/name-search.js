@@ -101,8 +101,10 @@
         if (option) select(option);
     });
     wrapper.addEventListener("focusout", () => requestAnimationFrame(() => {
-        if (!wrapper.contains(document.activeElement)) close();
+        // Keep Continue in place between pointer-down and pointer-up.
+        if (!input.form.contains(document.activeElement)) close();
     }));
+    input.form.addEventListener("submit", close);
     document.getElementById("new-member").addEventListener("toggle", event => {
         if (event.target.open) {
             const newName = document.getElementById("new-user-name");

@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:ui": "playwright test && playwright test --config=playwright.admin.config.js"
+    "test:ui": "playwright test",
+    "test:e2e": "playwright test --config=playwright.scenarios.config.js",
+    "test:fixtures": "node --test tests/node/*.test.js"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.11.0",
