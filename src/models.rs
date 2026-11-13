@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Timelike, Utc};
+use chrono::{DateTime, Datelike, Timelike};
 use chrono_tz::{Europe::Berlin, Tz};
 
 #[derive(Clone, Debug)]
@@ -132,7 +132,8 @@ impl Slot {
     }
 
     pub fn has_started(&self) -> bool {
-        self.parsed_datetime().is_none_or(|time| time <= Utc::now())
+        self.parsed_datetime()
+            .is_none_or(|time| time <= crate::clock::now())
     }
 
     pub fn booking_status(&self, user_id: &Option<i64>) -> String {

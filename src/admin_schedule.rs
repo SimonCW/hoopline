@@ -7,7 +7,7 @@ use axum::{
     http::HeaderMap,
     response::{Html, Response},
 };
-use chrono::{NaiveTime, Timelike, Utc};
+use chrono::{NaiveTime, Timelike};
 use serde::Deserialize;
 use sqlx::{Row, SqlitePool};
 
@@ -91,7 +91,7 @@ pub(crate) async fn page(
     let release: String = settings.try_get("sunday_release_time")?;
     let time = NaiveTime::parse_from_str(&release, "%H:%M")
         .map_err(|_| AppError::BadRequest("Invalid release time.".into()))?;
-    let (next, monday) = scheduling::next_release(Utc::now(), time)
+    let (next, monday) = scheduling::next_release(crate::clock::now(), time)
         .map_err(|message| AppError::BadRequest(message.into()))?;
     let next_release = format!(
         "{} Berlin time opens games for {} to {}",

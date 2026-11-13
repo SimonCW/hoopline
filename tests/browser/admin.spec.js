@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../scenarios/fixtures.js';
 import { randomUUID } from 'node:crypto';
 import AxeBuilder from '@axe-core/playwright';
 
@@ -11,7 +11,7 @@ async function enterAdmin(page) {
   await expect(page.getByRole('button', { name: 'Leave Admin' })).toBeVisible();
 }
 
-test('admin mode adds and reorders waitlisted members', async ({ page, context }) => {
+test('admin mode adds and reorders waitlisted members', async ({ page, context, baseURL }) => {
   const names = [`Admin test ${randomUUID()}`, `Admin test ${randomUUID()}`];
   for (const name of names) {
     await page.goto('/');
@@ -20,7 +20,7 @@ test('admin mode adds and reorders waitlisted members', async ({ page, context }
     await page.getByRole('button', { name: 'Create and continue' }).click();
     await page.getByRole('button', { name: 'Log out' }).click();
   }
-  await context.addCookies([{ name: 'user_id', value: '1', url: 'http://127.0.0.1:5052' }]);
+  await context.addCookies([{ name: 'user_id', value: '1', url: baseURL }]);
   await enterAdmin(page);
   await expect(page.getByText('Admin mode', { exact: true }).last()).toBeVisible();
   const card = page.getByTestId('slot-card').first();
@@ -49,8 +49,8 @@ test('admin mode adds and reorders waitlisted members', async ({ page, context }
   expect(results.violations).toEqual([]);
 });
 
-test('admin can edit a game and the recurring release setting', async ({ page, context }) => {
-  await context.addCookies([{ name: 'user_id', value: '1', url: 'http://127.0.0.1:5052' }]);
+test('admin can edit a game and the recurring release setting', async ({ page, context, baseURL }) => {
+  await context.addCookies([{ name: 'user_id', value: '1', url: baseURL }]);
   await enterAdmin(page);
   await page.getByRole('link', { name: 'Edit this game' }).first().click();
   const venue = page.getByLabel('Location');
@@ -88,8 +88,8 @@ test('admin can edit a game and the recurring release setting', async ({ page, c
   expect(accessibility.violations).toEqual([]);
 });
 
-test('password controls admin access and leave keeps the member', async ({ page, context }) => {
-  await context.addCookies([{ name: 'user_id', value: '2', url: 'http://127.0.0.1:5052' }]);
+test('password controls admin access and leave keeps the member', async ({ page, context, baseURL }) => {
+  await context.addCookies([{ name: 'user_id', value: '2', url: baseURL }]);
   await page.goto('/slots?mode=admin');
   await expect(page.getByText('Admin mode', { exact: true })).toHaveCount(0);
   await page.getByRole('link', { name: 'Admin UI' }).click();
@@ -110,30 +110,33 @@ test('password controls admin access and leave keeps the member', async ({ page,
   await expect(page.getByText('admin access required')).toBeVisible();
 });
 
-test('a stale password form cannot change the newly selected member', async ({ page, context }) => {
-  await context.addCookies([{ name: 'user_id', value: '1', url: 'http://127.0.0.1:5052' }]);
+test('a stale password form cannot change the newly selected member', async ({ page, context, baseURL }) => {
+  await context.addCookies([{ name: 'user_id', value: '1', url: baseURL }]);
   await page.goto('/admin/login');
-  await context.addCookies([{ name: 'user_id', value: '2', url: 'http://127.0.0.1:5052' }]);
+  await context.addCookies([{ name: 'user_id', value: '2', url: baseURL }]);
   await page.getByLabel('Password').fill('admin');
   await page.getByRole('button', { name: 'Enter admin UI' }).click();
   await expect(page.getByText('Your selected name changed. Refresh slots before booking.')).toBeVisible();
   expect((await context.cookies()).find(cookie => cookie.name === 'admin_session')).toBeUndefined();
 });
 
-test('failed attempts for one member do not lock another out', async ({ page, context }) => {
+test('failed attempts for one member do not lock another out', async ({ page, context, baseURL, app }) => {
   await page.goto('/');
   await page.locator('#new-member > summary').click();
   await page.getByLabel('New member name').fill(`Login test ${randomUUID()}`);
   await page.getByRole('button', { name: 'Create and continue' }).click();
   await page.getByRole('link', { name: 'Admin UI' }).click();
-  for (let i = 0; i < 5; i += 1) {
+  for (let i = 0; i < 4; i += 1) {
     await page.getByLabel('Password').fill('wrong');
     await page.getByRole('button', { name: 'Enter admin UI' }).click();
     await expect(page.getByText('Incorrect password.')).toBeVisible();
   }
+  const id = (await context.cookies()).find(cookie => cookie.name === 'user_id').value;
+  // Preserve the member lockout while resetting the per-IP process window.
+  await app.seed('INSERT INTO admin_login_failures VALUES (?, ?)', [Number(id), Date.parse('2030-01-07T12:00:00Z') / 1000]);
   await page.getByLabel('Password').fill('admin');
   await page.getByRole('button', { name: 'Enter admin UI' }).click();
   await expect(page.getByText(/Too many attempts for this member/)).toBeVisible();
-  await context.addCookies([{ name: 'user_id', value: '2', url: 'http://127.0.0.1:5052' }]);
+  await context.addCookies([{ name: 'user_id', value: '2', url: baseURL }]);
   await enterAdmin(page);
 });

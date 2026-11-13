@@ -153,7 +153,7 @@ pub(crate) struct GameEdit {
 pub(crate) async fn edit_game(pool: &SqlitePool, edit: &GameEdit) -> Result<(), AppError> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     checked_admin_slot(&mut tx, edit.slot_id, edit.revision).await?;
-    if edit.datetime <= Utc::now() {
+    if edit.datetime <= crate::clock::now() {
         return Err(AppError::BadRequest("Choose a future time.".into()));
     }
     let row = sqlx::query("SELECT datetime, venue, map_url, schedule_id FROM slots WHERE id = ?")
@@ -166,7 +166,7 @@ pub(crate) async fn edit_game(pool: &SqlitePool, edit: &GameEdit) -> Result<(), 
     let map_url = edit.map_url.as_deref().unwrap_or(&old_map_url);
     let old = DateTime::parse_from_rfc3339(&old_datetime)
         .map_err(|_| AppError::BadRequest("The existing game time is invalid.".into()))?;
-    if old.with_timezone(&Utc) <= Utc::now() {
+    if old.with_timezone(&Utc) <= crate::clock::now() {
         return Err(AppError::BadRequest(
             "This game has already started.".into(),
         ));
@@ -341,7 +341,7 @@ pub(crate) async fn seed_preview_roster(pool: &SqlitePool) -> Result<(), sqlx::E
     let slot_id: Option<i64> = sqlx::query_scalar(
         "SELECT id FROM slots WHERE julianday(datetime) > julianday(?) ORDER BY julianday(datetime) DESC, id DESC LIMIT 1",
     )
-    .bind(Utc::now().to_rfc3339())
+    .bind(crate::clock::now().to_rfc3339())
     .fetch_optional(&mut *tx)
     .await?;
     let Some(slot_id) = slot_id else {
@@ -513,7 +513,7 @@ pub(crate) async fn create_upcoming_slots_report(
 ///
 /// Returns an error when the slot or booking query fails, or row decoding fails.
 pub async fn list_slots(pool: &SqlitePool) -> Result<Vec<Slot>, sqlx::Error> {
-    list_slots_at(pool, Utc::now()).await
+    list_slots_at(pool, crate::clock::now()).await
 }
 
 /// Returns slots from the current Berlin calendar day onward.
@@ -609,7 +609,7 @@ pub async fn signup_for_slot(
 ) -> Result<SignupOutcome, sqlx::Error> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let slot_limits = sqlx::query("SELECT max_players, max_waitlist, julianday(datetime) <= julianday(?) AS started FROM slots WHERE id = ?")
-        .bind(Utc::now().to_rfc3339())
+        .bind(crate::clock::now().to_rfc3339())
         .bind(slot_id)
         .fetch_optional(&mut *tx)
         .await?;
