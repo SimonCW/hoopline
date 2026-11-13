@@ -6,6 +6,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
 
 use crate::{
+    activity::{ActivityKind, BookingActivity, record_booking},
     error::AppError,
     models::{Slot, UserIdentity},
 };
@@ -82,12 +83,13 @@ pub(crate) async fn admin_add_member(
         return Err(AppError::BadRequest("The selected list is full.".into()));
     }
     sqlx::query(
-        "INSERT INTO bookings (slot_id, user_id, position, is_waitlist) VALUES (?, ?, ?, ?)",
+        "INSERT INTO bookings (slot_id, user_id, position, is_waitlist, created_at) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(slot_id)
     .bind(user_id)
     .bind(count + 1)
     .bind(is_waitlist)
+    .bind(crate::clock::now().to_rfc3339_opts(SecondsFormat::Micros, true))
     .execute(&mut *tx)
     .await?;
     increment_slot_revision(&mut tx, slot_id).await?;
@@ -639,14 +641,26 @@ pub async fn signup_for_slot(
             .await?;
     if player_count < max_players {
         sqlx::query(
-            "INSERT INTO bookings (slot_id, user_id, position, is_waitlist) VALUES (?, ?, ?, 0)",
+            "INSERT INTO bookings (slot_id, user_id, position, is_waitlist, created_at) VALUES (?, ?, ?, 0, ?)",
         )
         .bind(slot_id)
         .bind(user_id)
         .bind(player_count + 1)
+        .bind(crate::clock::now().to_rfc3339_opts(SecondsFormat::Micros, true))
         .execute(&mut *tx)
         .await?;
         increment_slot_revision(&mut tx, slot_id).await?;
+        record_booking(
+            &mut tx,
+            BookingActivity {
+                kind: ActivityKind::SignedUp,
+                actor_user_id: user_id,
+                subject_user_id: user_id,
+                slot_id,
+                caused_by_activity_id: None,
+            },
+        )
+        .await?;
         tx.commit().await?;
         return Ok(SignupOutcome::AddedPlayer);
     }
@@ -658,14 +672,26 @@ pub async fn signup_for_slot(
             .await?;
     if waitlist_count < max_waitlist {
         sqlx::query(
-            "INSERT INTO bookings (slot_id, user_id, position, is_waitlist) VALUES (?, ?, ?, 1)",
+            "INSERT INTO bookings (slot_id, user_id, position, is_waitlist, created_at) VALUES (?, ?, ?, 1, ?)",
         )
         .bind(slot_id)
         .bind(user_id)
         .bind(waitlist_count + 1)
+        .bind(crate::clock::now().to_rfc3339_opts(SecondsFormat::Micros, true))
         .execute(&mut *tx)
         .await?;
         increment_slot_revision(&mut tx, slot_id).await?;
+        record_booking(
+            &mut tx,
+            BookingActivity {
+                kind: ActivityKind::SignedUp,
+                actor_user_id: user_id,
+                subject_user_id: user_id,
+                slot_id,
+                caused_by_activity_id: None,
+            },
+        )
+        .await?;
         tx.commit().await?;
         return Ok(SignupOutcome::AddedWaitlist);
     }
@@ -683,7 +709,7 @@ pub async fn cancel_booking_for_slot(
     slot_id: i64,
     user_id: i64,
 ) -> Result<CancelOutcome, sqlx::Error> {
-    cancel_booking_checked(pool, slot_id, user_id, None).await
+    cancel_booking(pool, slot_id, user_id, None, Some(user_id)).await
 }
 
 pub(crate) async fn cancel_booking_checked(
@@ -691,6 +717,17 @@ pub(crate) async fn cancel_booking_checked(
     slot_id: i64,
     user_id: i64,
     revision: Option<i64>,
+) -> Result<CancelOutcome, sqlx::Error> {
+    // This entry point is for administrative removal, not player cancellation.
+    cancel_booking(pool, slot_id, user_id, revision, None).await
+}
+
+async fn cancel_booking(
+    pool: &SqlitePool,
+    slot_id: i64,
+    user_id: i64,
+    revision: Option<i64>,
+    actor_user_id: Option<i64>,
 ) -> Result<CancelOutcome, sqlx::Error> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     if let Some(outcome) = cancellation_slot_status(&mut tx, slot_id, revision).await? {
@@ -713,47 +750,78 @@ pub(crate) async fn cancel_booking_checked(
         booking.try_get("is_waitlist")?,
     );
 
+    let cancellation_id = if let Some(actor_user_id) = actor_user_id {
+        Some(
+            record_booking(
+                &mut tx,
+                BookingActivity {
+                    kind: ActivityKind::Cancelled,
+                    actor_user_id,
+                    subject_user_id: user_id,
+                    slot_id,
+                    caused_by_activity_id: None,
+                },
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+
     sqlx::query("DELETE FROM bookings WHERE id = ?")
         .bind(booking_id)
         .execute(&mut *tx)
         .await?;
 
-    if is_waitlist == 1 {
-        sqlx::query(
-            "UPDATE bookings
-             SET position = position - 1
-             WHERE slot_id = ? AND is_waitlist = 1 AND position > ?",
-        )
-        .bind(slot_id)
-        .bind(booking_position)
-        .execute(&mut *tx)
-        .await?;
-        increment_slot_revision(&mut tx, slot_id).await?;
-        tx.commit().await?;
-        return Ok(CancelOutcome::Cancelled);
-    }
-
     sqlx::query(
         "UPDATE bookings
          SET position = position - 1
-         WHERE slot_id = ? AND is_waitlist = 0 AND position > ?",
+         WHERE slot_id = ? AND is_waitlist = ? AND position > ?",
     )
     .bind(slot_id)
+    .bind(is_waitlist)
     .bind(booking_position)
     .execute(&mut *tx)
     .await?;
 
+    if is_waitlist == 0 {
+        promote_first_waiter(&mut tx, slot_id, actor_user_id, cancellation_id).await?;
+    }
+    increment_slot_revision(&mut tx, slot_id).await?;
+    tx.commit().await?;
+    Ok(CancelOutcome::Cancelled)
+}
+
+async fn promote_first_waiter(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    slot_id: i64,
+    actor_user_id: Option<i64>,
+    cancellation_id: Option<i64>,
+) -> Result<(), sqlx::Error> {
     let waitlist_top = sqlx::query(
-        "SELECT id, position
+        "SELECT id, position, user_id
          FROM bookings
          WHERE slot_id = ? AND is_waitlist = 1
          ORDER BY position ASC
          LIMIT 1",
     )
     .bind(slot_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?;
     if let Some(waitlist_top) = waitlist_top {
+        if let Some(actor_user_id) = actor_user_id {
+            record_booking(
+                tx,
+                BookingActivity {
+                    kind: ActivityKind::Promoted,
+                    actor_user_id,
+                    subject_user_id: waitlist_top.try_get("user_id")?,
+                    slot_id,
+                    caused_by_activity_id: cancellation_id,
+                },
+            )
+            .await?;
+        }
         let promoted_booking_id: i64 = waitlist_top.try_get("id")?;
         let promoted_waitlist_position: i64 = waitlist_top.try_get("position")?;
 
@@ -761,7 +829,7 @@ pub(crate) async fn cancel_booking_checked(
             "SELECT COALESCE(MAX(position), 0) + 1 FROM bookings WHERE slot_id = ? AND is_waitlist = 0",
         )
         .bind(slot_id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await?;
 
         sqlx::query(
@@ -771,7 +839,7 @@ pub(crate) async fn cancel_booking_checked(
         )
         .bind(next_player_position)
         .bind(promoted_booking_id)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
 
         sqlx::query(
@@ -781,13 +849,11 @@ pub(crate) async fn cancel_booking_checked(
         )
         .bind(slot_id)
         .bind(promoted_waitlist_position)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     }
 
-    increment_slot_revision(&mut tx, slot_id).await?;
-    tx.commit().await?;
-    Ok(CancelOutcome::Cancelled)
+    Ok(())
 }
 
 /// Promotes a waitlisted user into the player list.

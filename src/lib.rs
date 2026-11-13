@@ -1,3 +1,4 @@
+mod activity;
 mod admin_schedule;
 mod clock;
 pub mod db;
