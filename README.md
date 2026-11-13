@@ -72,6 +72,83 @@ Press `q` in Bacon to stop it.
 - **Edit this game** changes one occurrence. When bookings exist, the admin must choose whether to keep or clear them. Clearing removes players and waitlist members without notifications.
 - **Edit recurring schedule** changes defaults for newly generated games only. Existing games and bookings stay unchanged. Pausing a schedule does not remove published games. Previously opened games remain available when the release time changes.
 
+### Activity log
+
+The `activity_log` table uses the same SQLite database as bookings. With 75
+members and about 30 requests per minute at peak, a second database adds no
+useful capacity. One transaction writes the booking change and its history.
+If the log write fails, the booking change also fails. Existing backups include
+the log.
+
+The app records successful member booking changes:
+
+- `booking.signed_up`: a member joins the player list or waitlist.
+- `booking.cancelled`: a member leaves either list.
+- `booking.promoted`: a cancellation moves the first waiter to the player list.
+
+Admin operations, including their automatic promotions, do not create entries.
+Selecting a name, logging out, page views, rejected requests, and preview data
+do not create entries. There is no history before this migration. This is
+activity history, not a complete record from which to rebuild the roster.
+
+Each row has an increasing ID, an action kind, an actor, and a subject.
+The actor is the member who caused the action. The subject is the member whose
+booking changed. For automatic promotion, these are different members.
+Names, game time, and venue are snapshots. Later edits do not change them.
+Deleting a member or game clears its foreign-key references, but keeps the
+snapshots. This prevents new records with reused IDs from inheriting old history.
+Deleted members and games cannot be grouped reliably across historical entries.
+Their names, times, and venues are not unique keys. Analysis by member or game
+must exclude cleared references. The log does not establish attendance or games
+played; a future ranking needs a separate, clearly defined participation measure.
+Member selection is not authentication. These entries identify the selected
+member, not a verified person.
+
+`occurred_at` and `slot_starts_at` use UTC RFC 3339 timestamps.
+`occurred_local_date` and `slot_local_date` use `Europe/Berlin`, including
+daylight-saving changes. The game fields are nullable for future actions that
+do not concern a game. Indexes support searches by member, game, and action kind.
+
+`details` is a JSON object. The separate `schema_version` column identifies its
+format; the current version is 1. For booking actions, `details` has:
+
+- `booking_id` and `booked_at`: the source booking ID and its creation time.
+  The creation time uses SQLite's UTC `YYYY-MM-DD HH:MM:SS` format.
+  Booking IDs use SQLite `AUTOINCREMENT` and are not reused by the app after
+  deletion. The same ID links all events for one booking lifecycle, including
+  bookings added by admins. A rebooking gets a new ID, even in the same second.
+  Activity IDs identify individual events. The migration preserves existing
+  bookings and their IDs, but cannot recover events from before the migration.
+- `list`: `players` or `waitlist`.
+- `position`: the position when the action was recorded.
+- `caused_by_activity_id`: the cancellation event ID for an automatic promotion.
+
+Signup snapshots show the new booking. Cancellation and promotion snapshots show
+the booking before the change. A promotion always changes `waitlist` to `players`.
+New action kinds can add their own JSON fields without a new table. Change
+`schema_version` if the meaning or structure of existing details changes.
+The app only appends entries. It has no log UI or public log endpoint.
+Keep database access restricted: the log contains member names and booking history.
+
+For example, this query counts player cancellations on game day within two hours
+before the start. It excludes waitlist departures and cancellations after start:
+
+```sql
+SELECT subject_user_id, COUNT(*) AS late_cancellations
+FROM activity_log
+WHERE kind = 'booking.cancelled'
+  AND subject_user_id IS NOT NULL
+  AND json_extract(details, '$.list') = 'players'
+  AND occurred_local_date = slot_local_date
+  AND julianday(occurred_at) BETWEEN julianday(slot_starts_at, '-2 hours')
+                               AND julianday(slot_starts_at)
+GROUP BY subject_user_id;
+```
+
+For a fair ranking, also include members with zero cancellations. Define a
+minimum number of games and a reporting period. Admin removals are not member
+cancellations. Keep those rules in the future feature, not in the stored events.
+
 ### Checks
 
 Run `just verify` for formatting, Clippy, and Rust tests. If `just` is not installed:

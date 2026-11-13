@@ -615,6 +615,7 @@ dependencies = [
  "chrono-tz",
  "http-body-util",
  "serde",
+ "serde_json",
  "sqlx",
  "subtle",
  "tempfile",
