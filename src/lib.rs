@@ -1,5 +1,6 @@
 mod activity;
 mod admin_schedule;
+mod clock;
 pub mod db;
 pub mod error;
 mod identity;
@@ -189,7 +190,7 @@ pub async fn app() -> Result<Router, AppError> {
         std::fs::create_dir_all("tmp")?;
     }
     let pool = db::init_pool(&database_url).await?;
-    create_upcoming_slots(&pool, Utc::now()).await?;
+    create_upcoming_slots(&pool, clock::now()).await?;
     if std::env::var("PREVIEW_SAMPLE").as_deref() == Ok("1") {
         db::seed_preview_roster(&pool).await?;
     }
@@ -202,7 +203,7 @@ pub async fn app() -> Result<Router, AppError> {
             if renewal_pool.is_closed() {
                 break;
             }
-            if let Err(error) = create_upcoming_slots(&renewal_pool, Utc::now()).await {
+            if let Err(error) = create_upcoming_slots(&renewal_pool, clock::now()).await {
                 eprintln!("slot renewal failed; will retry in one minute: {error}");
             }
         }
@@ -251,6 +252,7 @@ pub fn app_with_pool(pool: SqlitePool) -> Router {
         .route("/robots.txt", get(robots))
         .route("/assets/app.css", get(app_css))
         .route("/assets/app.js", get(app_js))
+        .route("/assets/htmx.min.js", get(htmx_js))
         .route("/assets/name-search.js", get(name_search_js))
         .route("/assets/wallpaper/rockets.webp", get(rockets_wallpaper))
         .route("/assets/wallpaper/bulls.webp", get(bulls_wallpaper))
@@ -585,7 +587,7 @@ async fn admin_generate_slots(
     State(pool): State<SqlitePool>,
     current_user: AdminIdentity,
 ) -> Result<Html<String>, AppError> {
-    let report = db::create_upcoming_slots_report(&pool, Utc::now()).await?;
+    let report = db::create_upcoming_slots_report(&pool, clock::now()).await?;
     let template = SlotsContentTemplate {
         identity_refresh_html: String::new(),
         current_user_id: Some(current_user.id()),
@@ -789,7 +791,9 @@ async fn admin_login(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| AppError::Forbidden("Admin login is not configured.".into()))?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    sqlx::query("DELETE FROM admin_login_failures WHERE attempted_at <= unixepoch() - 900")
+    let now = clock::now().timestamp();
+    sqlx::query("DELETE FROM admin_login_failures WHERE attempted_at <= ? - 900")
+        .bind(now)
         .execute(&mut *tx)
         .await?;
     let failures: i64 =
@@ -806,8 +810,9 @@ async fn admin_login(
         .into_response());
     }
     if !bool::from(password.as_bytes().ct_eq(form.password.as_bytes())) {
-        sqlx::query("INSERT INTO admin_login_failures VALUES (?, unixepoch())")
+        sqlx::query("INSERT INTO admin_login_failures VALUES (?, ?)")
             .bind(user.id)
+            .bind(now)
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
@@ -817,7 +822,8 @@ async fn admin_login(
         .bind(user.id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM admin_sessions WHERE expires_at <= unixepoch()")
+    sqlx::query("DELETE FROM admin_sessions WHERE expires_at <= ?")
+        .bind(now)
         .execute(&mut *tx)
         .await?;
     if let Some(token) = cookie_value(&headers, "admin_session") {
@@ -829,9 +835,10 @@ async fn admin_login(
     let token: String = sqlx::query_scalar("SELECT lower(hex(randomblob(32)))")
         .fetch_one(&mut *tx)
         .await?;
-    sqlx::query("INSERT INTO admin_sessions VALUES (?, ?, unixepoch() + 43200)")
+    sqlx::query("INSERT INTO admin_sessions VALUES (?, ?, ? + 43200)")
         .bind(&token)
         .bind(user.id)
+        .bind(now)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
@@ -894,6 +901,13 @@ async fn app_js() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         include_str!("../assets/app.js"),
+    )
+}
+
+async fn htmx_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../assets/htmx.min.js"),
     )
 }
 

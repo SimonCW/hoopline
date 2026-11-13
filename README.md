@@ -151,25 +151,16 @@ cancellations. Keep those rules in the future feature, not in the stored events.
 
 ### Checks
 
-Run `just verify` for formatting, Clippy, and Rust tests. If `just` is not installed:
-
-```sh
-cargo fmt --check
-cargo clippy --all-targets --all-features
-cargo test --all-targets --all-features
-```
-
-Browser tests need Node.js and Chromium:
+Install Rust, Node.js, Python 3, Just, and Chromium. Set up browser dependencies:
 
 ```sh
 npm ci
 npx playwright install chromium
-just test-ui
+just test-all
 ```
 
-Without `just`, use `npm run test:ui`. Tests start a disposable server on port 5051. They cover phone and desktop layouts, booking and promotion, keyboard use, automated accessibility checks, slow requests, request failures, and focus refreshes. Rust tests also cover daylight-saving changes and simultaneous signups against a file-backed database.
-
-The app serves its CSS locally. Booking controls need JavaScript and the pinned HTMX script from jsDelivr.
+`just test-all` runs the same complete suite as CI. See
+[local testing](docs/testing.md) for focused commands, isolation, and diagnostics.
 
 ### Identity checks for booking actions
 

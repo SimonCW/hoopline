@@ -1,11 +1,29 @@
 verify:
-  cargo fmt
-  cargo clippy --all-targets --all-features
-  cargo test --all-targets --all-features
+  cargo fmt --check
+  cargo clippy --locked --all-targets --all-features
+  cargo test --locked --all-targets --all-features
 
 # Run `npm ci` and `npx playwright install chromium` before the first run.
 test-ui:
-  npm run test:ui
+    cargo build --locked --features scenario-tests
+    npm run test:ui
+
+# Real browser journeys. Each test owns its server and file-backed database.
+test-e2e:
+    cargo build --locked --features scenario-tests
+    npm run test:fixtures
+    npm run test:e2e
+
+# Real HTTP concurrency and generated roster-model tests.
+test-races:
+    cargo test --locked --test races --test model
+
+# Prove that normal builds ignore the scenario-only clock environment.
+test-production-clock:
+    cargo test --locked --no-default-features --test clock_process
+
+# Run the complete local check set after installing browser prerequisites.
+test-all: verify test-production-clock test-e2e test-ui
 
 # Stop this checkout's dev server on port 5050, but not other applications.
 stop-dev:

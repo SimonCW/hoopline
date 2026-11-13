@@ -20,6 +20,10 @@ async fn run() -> Result<(), String> {
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
         .map_err(|error| format!("failed to bind listener: {error}"))?;
+    let address = listener
+        .local_addr()
+        .map_err(|error| format!("failed to read listener address: {error}"))?;
+    println!("HOOPLINE_LISTENING={address}");
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),

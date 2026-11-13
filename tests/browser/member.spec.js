@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../scenarios/fixtures.js';
 import { randomUUID } from 'node:crypto';
 import AxeBuilder from '@axe-core/playwright';
 
@@ -194,36 +194,6 @@ test('focus refresh discovers a booking made in another session', async ({ page,
   await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
 });
 
-test('waitlist status updates after automatic promotion', async ({ page, request }) => {
-  const name = await createMember(page);
-  const card = page.getByTestId('slot-card').first();
-  const slotId = (await card.getAttribute('id')).replace('slot-', '');
-  const [count, capacity] = (await card.locator('.availability strong').first().textContent()).split('/').map(Number);
-  const cookies = [];
-  try {
-    for (let index = count; index < capacity; index += 1) {
-      const response = await request.post('/users/select', { form: { new_user_name: `Fill ${randomUUID().slice(0, 8)}` }, maxRedirects: 0 });
-      const cookie = response.headers()['set-cookie'].split(';')[0];
-      cookies.push(cookie);
-      expect((await request.post(`/slots/${slotId}/signup`, { headers: { Cookie: cookie, 'X-Hoopline-User': cookie.split('=')[1] } })).ok()).toBe(true);
-    }
-    await page.getByRole('button', { name: 'Refresh slots' }).click();
-    await card.getByRole('button', { name: 'Join Waitlist', exact: true }).click();
-    await expect(card.getByTestId('booking-status')).toHaveText('Waitlist #1');
-    await expect(card.locator('[data-feedback]')).toContainText('Waitlist #1');
-    await request.post(`/slots/${slotId}/cancel`, { headers: { Cookie: cookies[0], 'X-Hoopline-User': cookies[0].split('=')[1] } });
-    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-    await expect(card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
-    await card.locator('.roster > summary').click();
-    await expect(card.locator('.current-player')).toContainText(name);
-    page.once('dialog', dialog => dialog.accept());
-    await card.getByRole('button', { name: 'Cancel booking' }).click();
-    await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
-  } finally {
-    for (const cookie of cookies) await request.post(`/slots/${slotId}/cancel`, { headers: { Cookie: cookie, 'X-Hoopline-User': cookie.split('=')[1] } });
-  }
-});
-
 test('member forms and expanded rosters pass automated accessibility checks', async ({ page }) => {
   await page.goto('/');
   await page.locator('#new-member > summary').click();
@@ -246,14 +216,7 @@ test('member forms and expanded rosters pass automated accessibility checks', as
   await expect(card.getByTestId('booking-status')).toHaveText('Not booked');
 });
 
-test('focus refresh keeps identity header aligned with the cookie', async ({ page }) => {
-  await createMember(page);
-  await page.context().addCookies([{ name: 'user_id', value: '2', url: 'http://127.0.0.1:5051' }]);
-  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(page.locator('.identity-name')).toHaveText('Ben');
-});
-
-test('a focus refresh during an older response is not lost', async ({ page }) => {
+test('a focus refresh during an older response is not lost', async ({ page, baseURL }) => {
   await createMember(page);
   let release;
   let captured;
@@ -270,7 +233,7 @@ test('a focus refresh during an older response is not lost', async ({ page }) =>
   });
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await capture;
-  await page.context().addCookies([{ name: 'user_id', value: '2', url: 'http://127.0.0.1:5051' }]);
+  await page.context().addCookies([{ name: 'user_id', value: '2', url: baseURL }]);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   release();
   await expect(page.locator('.identity-name')).toHaveText('Ben');
@@ -309,7 +272,11 @@ test('fuzzy search allows explicit pointer selection and does not guess a user',
   await page.getByRole('combobox', { name: 'Your name' }).fill('Jmli');
   await expect(page.getByRole('option', { name: 'Jamali', exact: true })).toBeVisible();
   await expect(page.getByTestId('slot-card')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  // Hold the pointer through a frame. Blur must not move Continue before release.
+  await page.getByRole('button', { name: 'Continue', exact: true }).hover();
+  await page.mouse.down();
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+  await page.mouse.up();
   await expect(page.locator('#name-step').getByRole('alert')).toContainText('Choose your name from the list');
   await expect(page.getByTestId('slot-card')).toHaveCount(0);
   await page.getByRole('combobox', { name: 'Your name' }).focus();

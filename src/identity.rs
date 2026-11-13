@@ -81,9 +81,10 @@ pub(crate) async fn current_user_from_headers(
         let mut user = find_user_by_id(pool, user_id).await?;
         if let Some(ref mut user) = user {
             user.is_admin = if let Some(token) = cookie_value(headers, "admin_session") {
-                sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM admin_sessions WHERE token = ? AND user_id = ? AND expires_at > unixepoch())")
+                sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM admin_sessions WHERE token = ? AND user_id = ? AND expires_at > ?)")
                     .bind(token)
                     .bind(user.id)
+                    .bind(crate::clock::now().timestamp())
                     .fetch_one(pool)
                     .await? != 0
             } else {
