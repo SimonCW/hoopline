@@ -55,7 +55,9 @@ Press `q` in Bacon to stop it.
 - The app remembers your user ID for one year in an `HttpOnly`, `SameSite=Lax` cookie. Returning visitors go straight to the overview. Names and booking details are not stored in the cookie.
 - Use **Log out** at the top right if you selected the wrong name or use a shared device. This clears the cookie, not your bookings. Name selection is not authentication.
 - Expand **Who's playing?** to see the player list and ordered waitlist.
-- A cancellation automatically promotes the first waitlist member. No notification is sent.
+- A member cancellation automatically promotes the first waitlist member. When
+  configured, registered devices can receive a best-effort promotion alert.
+  Admin actions do not send alerts. Check the roster for the current booking.
 - New games open every Sunday at 19:00 Berlin time for the week starting eight days later. For example, Sunday 8 November opens 16–22 November. Renewal runs every minute. Admins can change the shared Sunday release time.
 - New schedule times use `Europe/Berlin`, including daylight-saving changes. Dates show local times without a time-zone label.
 - Existing slots retain their stored instant and bookings after migration. Review legacy slot times separately; they are not silently moved. Generation does not create a duplicate for the same venue and local date.
@@ -63,6 +65,46 @@ Press `q` in Bacon to stop it.
 - Booking actions are tied to the member shown on the page. If another tab changes the selected user, stale actions return an error without changing bookings. Refresh before trying again.
 - Booking and refresh controls stay disabled during shared requests, including page updates. Disabled buttons turn gray. A CSS refresh icon rotates only while the overview updates, without changing the button size. Reduced-motion mode keeps the icon still. Screen readers receive status updates. Errors remain visible.
 - Set `COOKIE_SECURE=true` in an HTTPS deployment so the browser sends the identity cookie only over HTTPS. Leave it unset for local HTTP previews.
+
+### Promotion alerts and installation
+
+Hoopline can be installed as an online-only web app. On iPhone or iPad, use
+**Share → Add to Home Screen**, select **Open as Web App** if offered, and open
+Hoopline from the Home Screen. Select your name again there; browser storage
+may not transfer. Installation is optional and does not grant notification
+permission. Booking needs an internet connection.
+
+When alerts are configured, use **Enable promotion alerts** on the games page.
+If permission is already granted, joining a waitlist also registers this device.
+Use **Turn off alerts on this device** to prevent automatic registration until
+you enable alerts again. Each device has its own setting. Delivery is best effort:
+the push provider may accept an alert without the player seeing it. A push
+cannot be recalled after the provider accepts it. Check the roster for changes.
+
+Push is disabled by default. To enable it, set:
+
+- `PUSH_ENABLED=true`
+- `APP_ORIGIN` to the canonical HTTPS origin, such as `https://example.com`.
+- `VAPID_PRIVATE_KEY` to a stable P-256 private scalar as unpadded base64url.
+- `VAPID_PUBLIC_KEY` to the matching uncompressed public key as unpadded base64url.
+- `VAPID_SUBJECT` to an operator contact, such as `mailto:admin@example.com`.
+
+The app rejects invalid settings at startup. Keep the private key secret, stable
+across restarts, and backed up. Key rotation can require device resubscription.
+Set `COOKIE_SECURE=true` for the member cookie as well. The push device cookie is
+always secure when push is enabled. The host needs outbound HTTPS access to
+Apple, Mozilla, and Google push services and persistent SQLite storage. Failed
+delivery is retried until expiry, at most six times. Alerts expire at the earlier
+of the game start or 30 minutes after promotion.
+
+The database accepts up to five active devices per member and 5,000 stored
+devices in total. It removes device records after 366 days without an update,
+in batches. An explicit off choice is retained for at least the one-year device
+cookie lifetime. Native builds need OpenSSL development headers and `pkg-config`.
+
+Name selection is not authentication. A visitor can select another member's name
+and register their own device for that member. Device ownership prevents changes
+to another device, but does not prevent impersonation.
 
 ### Admin mode
 

@@ -58,6 +58,19 @@ stdout chunks from being treated as a complete listener announcement.
 `just test-production-clock` proves that a normal build ignores the clock
 override.
 
+`tests/scenarios/pwa.spec.js` allows service workers for its isolated browser
+contexts. It checks local worker registration and the manifest. It also stubs
+push APIs to check signup preparation, restored pages, the shared request lock,
+and identity refresh. The other browser scenarios continue to block service
+workers. Rust tests exercise enrollment, the outbox, leases, retries, ownership,
+and encrypted message construction without contacting push providers.
+
+These tests do not prove operating-system notification delivery. Before relying
+on alerts, test an installed iPhone web app, Android Chrome, and a desktop
+browser on HTTPS with consenting testers. Check permission changes, a test alert,
+member-triggered promotion, notification tap, and logout. Do not send real
+alerts to members without separate approval.
+
 ## Layers
 
 - `tests/scenarios/`: isolated browser journeys, request gates, process restarts,

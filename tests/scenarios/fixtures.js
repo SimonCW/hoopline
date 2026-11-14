@@ -22,7 +22,7 @@ export const test = base.extend({
     await app.blockNetwork(context);
     await use();
   }, { auto: true }],
-  app: async ({ browser, contextOptions, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent, seedProfile, now }, use, testInfo) => {
+  app: async ({ browser, contextOptions, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent, seedProfile, now, serviceWorkers }, use, testInfo) => {
     const directory = await mkdtemp(join(process.env.TMPDIR || tmpdir(), 'hoopline-scenario-'));
     const databasePath = join(directory, 'hoopline.sqlite');
     let port = 0;
@@ -134,7 +134,7 @@ with sqlite3.connect(sys.argv[1]) as db:
     async function newActor(name, { admin = false } = {}) {
       const context = await browser.newContext({
         ...contextOptions, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent, baseURL,
-        serviceWorkers: 'block',
+        serviceWorkers,
       });
       contexts.push(context);
       await blockNetwork(context);

@@ -15,6 +15,10 @@ pub enum AppError {
     Migration(#[from] sqlx::migrate::MigrateError),
     #[error("invalid response header value")]
     InvalidHeaderValue(#[from] InvalidHeaderValue),
+    #[error("push configuration error: {0}")]
+    Configuration(&'static str),
+    #[error("Too many requests. Please wait and try again.")]
+    RateLimited,
     #[error("{0}")]
     BadRequest(String),
     #[error("{0}")]
@@ -48,7 +52,9 @@ impl IntoResponse for AppError {
             | AppError::Render(_)
             | AppError::Database(_)
             | AppError::Migration(_)
-            | AppError::InvalidHeaderValue(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            | AppError::InvalidHeaderValue(_)
+            | AppError::Configuration(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            AppError::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
             AppError::Forbidden(_) => StatusCode::FORBIDDEN,
             AppError::IdentityChanged | AppError::StaleSlot => StatusCode::CONFLICT,

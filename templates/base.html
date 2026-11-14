@@ -3,6 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#192638">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
     <meta name="htmx-config" content='{"includeIndicatorStyles": false, "timeout": 15000}'>
     <title>{% block title %}{{ title }}{% endblock %}</title>
     <script>
@@ -15,6 +19,7 @@
     <script defer src="/assets/htmx.min.js"></script>
     <script defer src="/assets/app.js"></script>
     <script defer src="/assets/name-search.js"></script>
+    <script defer src="/assets/pwa.js"></script>
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -25,6 +30,12 @@
         <noscript><p class="request-error">Enable JavaScript to select your name and manage bookings.</p></noscript>
         {% block content %}{% endblock %}
         <footer>
+            <details>
+                <summary>Install Hoopline</summary>
+                <p>On iPhone or iPad, choose Share → Add to Home Screen. Select Open as Web App if available, then open Hoopline from your Home Screen.</p>
+                <p>On other devices, use your browser's install or add to home screen option. Hoopline needs an internet connection. Select your name again in the installed app.</p>
+                <button type="button" id="install-app" hidden>Install Hoopline</button>
+            </details>
             <div class="theme-picker">
                 <label for="theme-select">Choose a theme</label>
                 <select id="theme-select">

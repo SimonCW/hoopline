@@ -609,6 +609,15 @@ pub async fn signup_for_slot(
     slot_id: i64,
     user_id: i64,
 ) -> Result<SignupOutcome, sqlx::Error> {
+    Ok(signup_with_push(pool, slot_id, user_id, None).await?.0)
+}
+
+pub(crate) async fn signup_with_push(
+    pool: &SqlitePool,
+    slot_id: i64,
+    user_id: i64,
+    binding: Option<&crate::push::Binding>,
+) -> Result<(SignupOutcome, Option<crate::push::BindOutcome>), sqlx::Error> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let slot_limits = sqlx::query("SELECT max_players, max_waitlist, julianday(datetime) <= julianday(?) AS started FROM slots WHERE id = ?")
         .bind(crate::clock::now().to_rfc3339())
@@ -616,10 +625,10 @@ pub async fn signup_for_slot(
         .fetch_optional(&mut *tx)
         .await?;
     let Some(slot_limits) = slot_limits else {
-        return Ok(SignupOutcome::SlotNotFound);
+        return Ok((SignupOutcome::SlotNotFound, None));
     };
     if slot_limits.try_get::<i64, _>("started")? != 0 {
-        return Ok(SignupOutcome::Started);
+        return Ok((SignupOutcome::Started, None));
     }
     let max_players: i64 = slot_limits.try_get("max_players")?;
     let max_waitlist: i64 = slot_limits.try_get("max_waitlist")?;
@@ -631,7 +640,7 @@ pub async fn signup_for_slot(
             .fetch_one(&mut *tx)
             .await?;
     if already_signed_up > 0 {
-        return Ok(SignupOutcome::AlreadySignedUp);
+        return Ok((SignupOutcome::AlreadySignedUp, None));
     }
 
     let player_count: i64 =
@@ -662,7 +671,7 @@ pub async fn signup_for_slot(
         )
         .await?;
         tx.commit().await?;
-        return Ok(SignupOutcome::AddedPlayer);
+        return Ok((SignupOutcome::AddedPlayer, None));
     }
 
     let waitlist_count: i64 =
@@ -692,11 +701,16 @@ pub async fn signup_for_slot(
             },
         )
         .await?;
+        let binding_result = if let Some(binding) = binding {
+            Some(crate::push::bind(&mut tx, user_id, binding).await?)
+        } else {
+            None
+        };
         tx.commit().await?;
-        return Ok(SignupOutcome::AddedWaitlist);
+        return Ok((SignupOutcome::AddedWaitlist, binding_result));
     }
 
-    Ok(SignupOutcome::Full)
+    Ok((SignupOutcome::Full, None))
 }
 
 /// Cancels a user's booking and promotes waitlist #1 when needed.
@@ -841,6 +855,27 @@ async fn promote_first_waiter(
         .bind(promoted_booking_id)
         .execute(&mut **tx)
         .await?;
+
+        if actor_user_id.is_some() {
+            let now = crate::clock::now().timestamp();
+            sqlx::query(
+                "INSERT INTO push_jobs
+                    (kind, device_id, generation, user_id, booking_id,
+                     created_at, next_attempt_at, expires_at)
+                 SELECT 'waitlist_promoted', d.id, d.generation, b.user_id, b.id,
+                        ?, ?, MIN(unixepoch(s.datetime), ?)
+                 FROM bookings b
+                 JOIN slots s ON s.id = b.slot_id
+                 JOIN push_devices d ON d.user_id = b.user_id
+                 WHERE b.id = ? AND d.enabled = 1 AND d.endpoint IS NOT NULL",
+            )
+            .bind(now)
+            .bind(now)
+            .bind(now + 30 * 60)
+            .bind(promoted_booking_id)
+            .execute(&mut **tx)
+            .await?;
+        }
 
         sqlx::query(
             "UPDATE bookings
@@ -1168,6 +1203,123 @@ mod tests {
     use sqlx::Row;
 
     use super::{create_upcoming_slots, init_pool, seed_preview_roster};
+
+    async fn promotion_fixture() -> sqlx::SqlitePool {
+        let pool = init_pool("sqlite::memory:").await.unwrap();
+        sqlx::raw_sql(
+            "INSERT INTO users (id, name) VALUES (1, 'Player'), (2, 'Waiter'), (3, 'Other');
+             INSERT INTO slots (id, datetime, venue, max_players, max_waitlist)
+                 VALUES (1, '2099-01-01T19:00:00Z', 'Court', 1, 2);
+             INSERT INTO bookings (slot_id, user_id, position, is_waitlist)
+                 VALUES (1, 1, 1, 0), (1, 2, 1, 1), (1, 3, 2, 1);
+             INSERT INTO push_devices (token_hash, user_id, endpoint, p256dh, auth, generation, created_at, updated_at)
+                 VALUES (x'01', 2, 'https://one.example', 'key', 'auth', 3, 0, 0),
+                        (x'02', 2, 'https://two.example', 'key', 'auth', 4, 0, 0),
+                        (x'03', 3, 'https://three.example', 'key', 'auth', 0, 0, 0);
+             UPDATE push_devices SET enabled = 0 WHERE token_hash = x'02';",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn member_promotion_enqueues_only_enabled_promoted_devices() {
+        let pool = promotion_fixture().await;
+        super::cancel_booking_for_slot(&pool, 1, 1).await.unwrap();
+        let jobs: Vec<(i64, i64, i64, i64)> =
+            sqlx::query_as("SELECT device_id, generation, user_id, booking_id FROM push_jobs")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        let booking: i64 = sqlx::query_scalar("SELECT id FROM bookings WHERE user_id = 2")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(jobs, vec![(1, 3, 2, booking)]);
+        super::cancel_booking_for_slot(&pool, 1, 1).await.unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM push_jobs")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn admin_promotion_does_not_enqueue_a_job() {
+        let pool = promotion_fixture().await;
+        super::cancel_booking_checked(&pool, 1, 1, None)
+            .await
+            .unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM push_jobs")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn waitlist_cancellation_does_not_enqueue_a_job() {
+        let pool = promotion_fixture().await;
+        super::cancel_booking_for_slot(&pool, 1, 2).await.unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM push_jobs")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn promotion_jobs_expire_at_game_start_and_cover_each_enabled_device() {
+        let pool = promotion_fixture().await;
+        let now = crate::clock::now().timestamp();
+        let starts = now + 300;
+        sqlx::query("UPDATE slots SET datetime = ? WHERE id = 1")
+            .bind(
+                chrono::DateTime::from_timestamp(starts, 0)
+                    .unwrap()
+                    .to_rfc3339(),
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE push_devices SET enabled = 1 WHERE id = 2")
+            .execute(&pool)
+            .await
+            .unwrap();
+        super::cancel_booking_for_slot(&pool, 1, 1).await.unwrap();
+        let jobs: Vec<(i64, i64)> =
+            sqlx::query_as("SELECT device_id, expires_at FROM push_jobs ORDER BY device_id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(jobs, vec![(1, starts), (2, starts)]);
+    }
+
+    #[tokio::test]
+    async fn job_failure_rolls_back_cancellation_promotion_and_activity() {
+        let pool = promotion_fixture().await;
+        sqlx::raw_sql(
+            "CREATE TRIGGER fail_push BEFORE INSERT ON push_jobs
+             BEGIN SELECT RAISE(ABORT, 'test failure'); END;",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(super::cancel_booking_for_slot(&pool, 1, 1).await.is_err());
+        let bookings: Vec<(i64, i64)> =
+            sqlx::query_as("SELECT user_id, is_waitlist FROM bookings ORDER BY user_id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(bookings, vec![(1, 0), (2, 1), (3, 1)]);
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM activity_log")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 
     #[tokio::test]
     async fn memory_database_connection_does_not_expire() {

@@ -23,6 +23,8 @@ enum Category {
     Login,
     PlayerSelection,
     PublicWrite,
+    PushSetup,
+    PushTest,
 }
 
 type ClientRequests = HashMap<(Option<IpAddr>, Category), VecDeque<Instant>>;
@@ -54,6 +56,7 @@ impl RateLimits {
             Category::Login => (5, 20),
             Category::PlayerSelection => (5, 10),
             Category::PublicWrite => (10, 20),
+            Category::PushSetup | Category::PushTest => (10, 30),
         };
         if requests.len() >= per_hour
             || requests
@@ -82,6 +85,10 @@ pub(crate) async fn limit_writes(
         Some(Category::Login)
     } else if path == "/users/select" {
         Some(Category::PlayerSelection)
+    } else if path == "/push/subscribe" || path == "/push/disable" {
+        Some(Category::PushSetup)
+    } else if path == "/push/test" {
+        Some(Category::PushTest)
     } else if path.starts_with("/slots/")
         && (path.ends_with("/signup") || path.ends_with("/cancel"))
     {
