@@ -85,6 +85,8 @@ Push is disabled by default. To enable it, set:
 
 - `PUSH_ENABLED=true`
 - `APP_ORIGIN` to the canonical HTTPS origin, such as `https://example.com`.
+  On Hostim, if this is unset, Hoopline uses the HTTPS origin of Hostim's
+  `BUILTIN_DOMAIN`. Set `APP_ORIGIN` explicitly when using a custom domain.
 - `VAPID_PRIVATE_KEY` to a stable P-256 private scalar as unpadded base64url.
 - `VAPID_PUBLIC_KEY` to the matching uncompressed public key as unpadded base64url.
 - `VAPID_SUBJECT` to an operator contact, such as `mailto:admin@example.com`.

@@ -54,8 +54,10 @@ pub(crate) fn initialize(pool: &SqlitePool) -> Result<Config, AppError> {
             "PUSH_ENABLED must be true or false",
         ));
     }
-    let origin = std::env::var("APP_ORIGIN")
-        .map_err(|_| AppError::Configuration("APP_ORIGIN is required"))?;
+    let origin = configured_origin(
+        std::env::var("APP_ORIGIN").ok().as_deref(),
+        std::env::var("BUILTIN_DOMAIN").ok().as_deref(),
+    )?;
     let public = std::env::var("VAPID_PUBLIC_KEY")
         .map_err(|_| AppError::Configuration("VAPID_PUBLIC_KEY is required"))?;
     let private = std::env::var("VAPID_PRIVATE_KEY")
@@ -65,6 +67,28 @@ pub(crate) fn initialize(pool: &SqlitePool) -> Result<Config, AppError> {
     let (config, sender) = configuration(&origin, &public, &private, &subject)?;
     tokio::spawn(sender::run(pool.clone(), sender));
     Ok(config)
+}
+
+fn configured_origin(
+    app_origin: Option<&str>,
+    builtin_domain: Option<&str>,
+) -> Result<String, AppError> {
+    if let Some(origin) = app_origin {
+        return Ok(origin.to_owned());
+    }
+    if let Some(domain) = builtin_domain {
+        match url::Host::parse(domain) {
+            Ok(url::Host::Domain(parsed))
+                if parsed == domain && parsed.contains('.') && !parsed.ends_with('.') =>
+            {
+                return Ok(format!("https://{parsed}"));
+            }
+            _ => return Err(AppError::Configuration("invalid BUILTIN_DOMAIN")),
+        }
+    }
+    Err(AppError::Configuration(
+        "APP_ORIGIN is required when push is enabled",
+    ))
 }
 
 fn configuration(
@@ -635,6 +659,38 @@ mod tests {
         assert!(
             super::configuration("https://hoopline.example", &public, private, "invalid").is_err()
         );
+    }
+
+    #[test]
+    fn hostim_origin_uses_trusted_builtin_domain_when_not_explicitly_configured() {
+        assert_eq!(
+            super::configured_origin(None, Some("hoopline-example.hostim.app")).unwrap(),
+            "https://hoopline-example.hostim.app"
+        );
+        assert_eq!(
+            super::configured_origin(
+                Some("https://basketball.example"),
+                Some("hoopline-example.hostim.app"),
+            )
+            .unwrap(),
+            "https://basketball.example"
+        );
+        assert!(super::configured_origin(None, None).is_err());
+        for invalid in [
+            "",
+            "localhost",
+            "127.0.0.1",
+            "example.com:443",
+            "https://example.com",
+            "example.com/path",
+            "user@example.com",
+            "example.com.",
+        ] {
+            assert!(
+                super::configured_origin(None, Some(invalid)).is_err(),
+                "{invalid}"
+            );
+        }
     }
 
     fn request(method: &str, path: &str, cookie: &str, origin: &str, body: &str) -> Request<Body> {
