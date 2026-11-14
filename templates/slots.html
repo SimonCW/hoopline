@@ -2,5 +2,12 @@
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
 {{ user_selector_html|safe }}
+<section id="push-controls" class="card" data-user-id="{{ current_user_id.unwrap_or_default() }}" data-available="{{ push_available }}" aria-labelledby="push-heading" hidden>
+    <h2 id="push-heading">Promotion alerts</h2>
+    <p id="push-status" role="status" aria-live="polite"></p>
+    <button type="button" class="btn btn-secondary" id="push-enable" hidden>Enable promotion alerts</button>
+    <button type="button" class="btn btn-secondary" id="push-test" hidden>Send test alert</button>
+    <button type="button" class="btn btn-secondary" id="push-disable" hidden>Turn off alerts on this device</button>
+</section>
 {% include "slots_content.html" %}
 {% endblock %}

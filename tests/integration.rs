@@ -46,6 +46,76 @@ async fn robots_discourages_indexing() {
 }
 
 #[tokio::test]
+async fn pwa_resources_are_local_and_not_cached() {
+    let app = app_with_pool(test_pool().await);
+    for (path, content_type) in [
+        ("/manifest.webmanifest", "application/manifest+json"),
+        ("/sw.js", "text/javascript; charset=utf-8"),
+        ("/assets/pwa.js", "text/javascript; charset=utf-8"),
+        ("/assets/icon-192.png", "image/png"),
+        ("/assets/icon-512.png", "image/png"),
+        ("/assets/apple-touch-icon.png", "image/png"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert_eq!(response.headers()[header::CONTENT_TYPE], content_type);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(!bytes.is_empty(), "{path}");
+        if content_type == "image/png" {
+            assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+        }
+        if path == "/manifest.webmanifest" {
+            let manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(manifest["id"], "/");
+            assert_eq!(manifest["scope"], "/");
+            assert_eq!(manifest["start_url"], "/");
+            assert_eq!(manifest["display"], "standalone");
+        }
+    }
+}
+
+#[tokio::test]
+async fn push_schema_rejects_incomplete_credentials_and_duplicate_promotions() {
+    let pool = test_pool().await;
+    let incomplete = sqlx::query(
+        "INSERT INTO push_devices (token_hash, endpoint, created_at, updated_at) VALUES (?, ?, 0, 0)",
+    )
+    .bind([1_u8; 32].as_slice())
+    .bind("https://example.com")
+    .execute(&pool)
+    .await;
+    assert!(incomplete.is_err());
+
+    sqlx::query("INSERT INTO push_devices (token_hash, user_id, created_at, updated_at) VALUES (?, 1, 0, 0)")
+        .bind([2_u8; 32].as_slice()).execute(&pool).await.unwrap();
+    let booking: i64 =
+        sqlx::query_scalar("SELECT id FROM bookings WHERE slot_id = 1 AND user_id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let insert = || {
+        sqlx::query("INSERT INTO push_jobs (kind, device_id, generation, user_id, booking_id, created_at, next_attempt_at, expires_at) VALUES ('waitlist_promoted', 1, 0, 1, ?, 0, 0, 10)").bind(booking)
+    };
+    insert().execute(&pool).await.unwrap();
+    assert!(insert().execute(&pool).await.is_err());
+    sqlx::query("DELETE FROM bookings WHERE id = ?")
+        .bind(booking)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM push_jobs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
 async fn forwarded_clients_have_separate_rate_limits() {
     let app = app_with_pool(test_pool().await);
     for _ in 0..5 {

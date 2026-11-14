@@ -5,10 +5,12 @@
     let pending = false;
     let refreshQueued = false;
     let focusAfterSwap = false;
+    let leaving = false;
+    let pageGeneration = 0;
     const openRosters = new Set();
 
     function disableBookingControls() {
-        document.querySelectorAll('#slots-content button, #user-selector form[hx-post] button, #refresh-slots, .admin-editor button').forEach(button => {
+        document.querySelectorAll('#slots-content button, #user-selector form button, #push-controls button, #refresh-slots, .admin-editor button').forEach(button => {
             // Only restore controls disabled by this request, not disabled slot states.
             if (!button.disabled) {
                 button.dataset.requestDisabled = "";
@@ -46,11 +48,70 @@
         htmx.trigger(body, "refresh-slots");
     }
 
+    window.HooplineRequestLock = {
+        acquire() {
+            if (pending) return false;
+            pending = true;
+            disableBookingControls();
+            return true;
+        },
+        release() {
+            finishRequest();
+            if (refreshQueued) {
+                refreshQueued = false;
+                if (!leaving) requestAnimationFrame(refresh);
+            }
+        },
+        refresh
+    };
+
     if (!window.htmx) {
         showError(null, "Booking controls could not load. Check your connection and reload this page.");
         document.querySelectorAll("form:not([action]) button").forEach(button => { button.disabled = true; });
         return;
     }
+
+    window.addEventListener("pagehide", () => { leaving = true; pageGeneration += 1; });
+    body.addEventListener("htmx:confirm", event => {
+        if (pending) {
+            event.preventDefault();
+            return;
+        }
+        const form = event.detail.elt;
+        if (!form.matches?.("form[data-signup]") || !window.HooplinePush?.shouldPrepare()) return;
+        event.preventDefault();
+        pending = true;
+        const generation = pageGeneration;
+        form.querySelectorAll("[data-push-preparation]").forEach(input => input.remove());
+        disableBookingControls();
+        const status = document.getElementById("booking-request-status");
+        status.textContent = "Preparing booking. Booking controls are temporarily unavailable.";
+        status.hidden = false;
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000));
+        Promise.race([window.HooplinePush.prepare(), timeout]).then(subscription => {
+            if (leaving || generation !== pageGeneration || !form.isConnected || !subscription) return;
+            const input = document.createElement("input");
+            input.type = "hidden";
+            input.name = "push_subscription";
+            input.dataset.pushPreparation = "";
+            input.value = subscription;
+            form.append(input);
+        }).catch(() => {
+            if (leaving || generation !== pageGeneration || !form.isConnected) return;
+            const input = document.createElement("input");
+            input.type = "hidden";
+            input.name = "push_failed";
+            input.dataset.pushPreparation = "";
+            input.value = "1";
+            form.append(input);
+        }).finally(() => {
+            if (leaving || generation !== pageGeneration || !form.isConnected) {
+                window.HooplineRequestLock.release();
+                return;
+            }
+            event.detail.issueRequest();
+        });
+    });
 
     body.addEventListener("click", (event) => {
         if (event.target.closest("#refresh-slots")) {
@@ -80,6 +141,7 @@
         document.querySelectorAll(".roster[open]").forEach(roster => openRosters.add(roster.id));
     });
     body.addEventListener("htmx:afterRequest", (event) => {
+        event.detail.elt.querySelectorAll?.("[data-push-preparation]").forEach(input => input.remove());
         // Successful outerHTML swaps still need to settle. A queued request on
         // the old target would otherwise disappear when that node is removed.
         if (!event.detail.successful) {
@@ -119,6 +181,12 @@
         if (feedback) {
             announce(feedback.textContent);
             target.querySelector("h3")?.focus({ preventScroll: true });
+            window.HooplinePush?.refreshStatus().then(() => {
+                if (feedback.textContent.includes("Alerts could not be enabled")) {
+                    const pushStatus = document.getElementById("push-status");
+                    if (pushStatus) pushStatus.textContent = "Booking saved. Alerts could not be enabled. Try again.";
+                }
+            });
         }
         if (target.id === "slots-content" && focusAfterSwap) {
             document.getElementById("refresh-slots")?.focus({ preventScroll: true });
@@ -138,7 +206,10 @@
     }, true);
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
-    window.addEventListener("pageshow", event => { if (event.persisted) refresh(); });
+    window.addEventListener("pageshow", event => {
+        leaving = false;
+        if (event.persisted) refresh();
+    });
 })();
 const themeSelect = document.getElementById('theme-select');
 if (themeSelect) {

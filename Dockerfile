@@ -8,6 +8,9 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pkg-config libssl-dev cmake \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --locked --recipe-path recipe.json
 COPY . .
@@ -15,7 +18,7 @@ RUN cargo build --release --locked --bin hoopline
 
 FROM debian:bookworm-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates gosu \
+    && apt-get install -y --no-install-recommends ca-certificates gosu libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --system --create-home --uid 10001 appuser

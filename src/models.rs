@@ -76,6 +76,10 @@ impl Slot {
         })
     }
 
+    pub fn user_is_waitlisted(&self, current_user_id: &Option<i64>) -> bool {
+        current_user_id.is_some_and(|user_id| self.waitlist_user_ids.contains(&user_id))
+    }
+
     pub fn can_accept_signup(&self) -> bool {
         !self.has_started()
             && (self.players.len() < self.max_players || self.waitlist.len() < self.max_waitlist)

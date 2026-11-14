@@ -25,13 +25,16 @@
             <button id="slot-action-{{ slot.id }}" type="submit" class="btn btn-secondary">Cancel booking</button>
         </form>
         {% elif slot.can_accept_signup() %}
-        <form hx-post="/slots/{{ slot.id }}/signup{% if admin_mode %}?mode=admin{% endif %}">
+        <form data-signup hx-post="/slots/{{ slot.id }}/signup{% if admin_mode %}?mode=admin{% endif %}">
             <button id="slot-action-{{ slot.id }}" type="submit" class="btn btn-primary">{{ slot.signup_action_label() }}</button>
         </form>
         {% else %}
         <p>Player list and waitlist are full.</p>
         {% endif %}
     </div>
+    {% if !admin_mode && slot.user_is_waitlisted(current_user_id) %}
+    <p class="muted" data-waitlist-alert hidden>You are on the waitlist. <button type="button" class="btn btn-small" data-enable-alerts>Enable alerts</button> to hear when you move up.</p>
+    {% endif %}
     {% if !feedback.is_empty() %}
     <p class="sr-only" data-feedback>{{ feedback }}</p>
     {% endif %}
@@ -110,7 +113,7 @@
                     </li>
                     {% endfor %}
                 </ol>
-                <p class="muted">First in line moves up automatically when a player cancels. Check back for your status; no notifications are sent.</p>
+                <p class="muted">First in line moves up automatically when a player cancels. Check your booking here. Promotion alerts depend on this device and may not arrive.</p>
             </section>
         </div>
     </details>
