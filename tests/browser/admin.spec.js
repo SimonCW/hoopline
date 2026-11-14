@@ -36,13 +36,14 @@ test('admin mode adds and reorders waitlisted members', async ({ page, context, 
   await expect(card.locator('[data-feedback]')).toHaveText('Member added.');
   await card.locator('.roster > summary').click();
   const rows = card.getByTestId('waitlist-row');
-  const name = await rows.last().locator('.member-name').textContent();
+  await expect(rows.locator('.member-name')).toHaveText(names);
   await rows.last().getByRole('button', { name: /Move .* up/ }).click();
-  await expect(rows.first().locator('.member-name')).toHaveText(name);
+  await expect(rows.locator('.member-name')).toHaveText([names[1], names[0]]);
   for (let count = 0; count < 2; count += 1) {
     page.once('dialog', dialog => dialog.accept());
     await rows.first().getByRole('button', { name: 'Remove' }).click();
     await expect(card.locator('[data-feedback]')).toHaveText('Player removed. The waitlist has been updated.');
+    await expect(rows).toHaveCount(1 - count);
   }
   await expect(rows).toHaveCount(0);
   const results = await new AxeBuilder({ page }).analyze();
