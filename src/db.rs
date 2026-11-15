@@ -326,20 +326,12 @@ pub async fn create_upcoming_slots(
     Ok(report.created)
 }
 
-/// Adds example rosters once to an empty preview database.
+/// Fills upcoming games with sample players without removing existing bookings.
 ///
 /// # Errors
 /// Returns an error if the example data cannot be written.
 pub(crate) async fn seed_preview_roster(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let occupied: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM preview_seed) OR EXISTS(SELECT 1 FROM users) OR EXISTS(SELECT 1 FROM bookings)",
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    if occupied {
-        return Ok(());
-    }
     let slot_id: Option<i64> = sqlx::query_scalar(
         "SELECT id FROM slots WHERE julianday(datetime) > julianday(?) ORDER BY julianday(datetime) DESC, id DESC LIMIT 1",
     )
@@ -349,7 +341,7 @@ pub(crate) async fn seed_preview_roster(pool: &SqlitePool) -> Result<(), sqlx::E
     let Some(slot_id) = slot_id else {
         return Ok(());
     };
-    sqlx::query("UPDATE slots SET max_players = 15, max_waitlist = 5 WHERE id = ?")
+    sqlx::query("UPDATE slots SET revision = revision + 1, max_players = MAX(max_players, 15), max_waitlist = MAX(max_waitlist, 5) WHERE id = ? AND (max_players < 15 OR max_waitlist < 5)")
         .bind(slot_id)
         .execute(&mut *tx)
         .await?;
@@ -372,22 +364,22 @@ pub(crate) async fn seed_preview_roster(pool: &SqlitePool) -> Result<(), sqlx::E
         "Paul Meyer",
         "Samira Ahmed",
     ];
-    for (offset, name) in names.iter().enumerate() {
-        let index = i64::try_from(offset).expect("preview roster index fits in i64") + 1;
-        let user_id: i64 = sqlx::query_scalar("INSERT INTO users (name) VALUES (?) RETURNING id")
+    let mut sample_ids = Vec::new();
+    for name in names {
+        sqlx::query("INSERT INTO users (name) VALUES (?) ON CONFLICT(name) DO NOTHING")
+            .bind(name)
+            .execute(&mut *tx)
+            .await?;
+        let user_id: i64 = sqlx::query_scalar("SELECT id FROM users WHERE name = ?")
             .bind(name)
             .fetch_one(&mut *tx)
             .await?;
-        sqlx::query(
-            "INSERT INTO bookings (slot_id, user_id, position, is_waitlist) VALUES (?, ?, ?, ?)",
-        )
-        .bind(slot_id)
-        .bind(user_id)
-        .bind(if index <= 15 { index } else { index - 15 })
-        .bind(i64::from(index > 15))
-        .execute(&mut *tx)
-        .await?;
+        sample_ids.push(user_id);
     }
+    let sample_ids =
+        serde_json::to_string(&sample_ids).expect("serializing sample user IDs cannot fail");
+    fill_preview_list(&mut tx, slot_id, 0, 15, &sample_ids).await?;
+    fill_preview_list(&mut tx, slot_id, 1, 2, &sample_ids).await?;
     let other_slots: Vec<(i64, i64)> = sqlx::query_as(
         "SELECT id, MIN(max_players, 3 + abs(random() % 5))
          FROM slots WHERE id != ? AND julianday(datetime) > julianday(?)",
@@ -397,20 +389,44 @@ pub(crate) async fn seed_preview_roster(pool: &SqlitePool) -> Result<(), sqlx::E
     .fetch_all(&mut *tx)
     .await?;
     for (other_slot, player_count) in other_slots {
-        sqlx::query(
-            "INSERT INTO bookings (slot_id, user_id, position, is_waitlist)
-             SELECT ?, id, row_number() OVER (), 0
-             FROM (SELECT id FROM users ORDER BY random() LIMIT ?)",
-        )
-        .bind(other_slot)
-        .bind(player_count)
-        .execute(&mut *tx)
-        .await?;
+        fill_preview_list(&mut tx, other_slot, 0, player_count, &sample_ids).await?;
     }
-    sqlx::query("INSERT INTO preview_seed (id) VALUES (1)")
-        .execute(&mut *tx)
-        .await?;
     tx.commit().await?;
+    Ok(())
+}
+
+async fn fill_preview_list(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    slot_id: i64,
+    is_waitlist: i64,
+    target: i64,
+    sample_ids: &str,
+) -> Result<(), sqlx::Error> {
+    let (count, last_position): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(MAX(position), 0) FROM bookings WHERE slot_id = ? AND is_waitlist = ?",
+    )
+    .bind(slot_id)
+    .bind(is_waitlist)
+    .fetch_one(&mut **tx)
+    .await?;
+    let added = sqlx::query(
+        "INSERT INTO bookings (slot_id, user_id, position, is_waitlist)
+         SELECT ?, id, ? + row_number() OVER (), ?
+         FROM (SELECT id FROM users WHERE id IN (SELECT value FROM json_each(?))
+               AND NOT EXISTS (SELECT 1 FROM bookings WHERE slot_id = ? AND user_id = users.id)
+               ORDER BY random() LIMIT ?)",
+    )
+    .bind(slot_id)
+    .bind(last_position)
+    .bind(is_waitlist)
+    .bind(sample_ids)
+    .bind(slot_id)
+    .bind((target - count).max(0))
+    .execute(&mut **tx)
+    .await?;
+    if added.rows_affected() > 0 {
+        increment_slot_revision(tx, slot_id).await?;
+    }
     Ok(())
 }
 
@@ -1455,7 +1471,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn file_preview_survives_restart_and_is_only_seeded_once() {
+    async fn file_preview_refills_after_restart() {
         let dir = tempfile::tempdir().unwrap();
         let url = format!("sqlite://{}", dir.path().join("preview.db").display());
         let pool = init_pool(&url).await.unwrap();
@@ -1476,33 +1492,56 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("DELETE FROM users")
-            .execute(&pool)
-            .await
-            .unwrap();
         seed_preview_roster(&pool).await.unwrap();
-        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM users")
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM bookings")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count, 0);
+        assert!(count >= 17);
     }
 
     #[tokio::test]
-    async fn preview_does_not_modify_existing_players() {
+    async fn preview_preserves_existing_players_and_bookings() {
         let pool = init_pool("sqlite::memory:").await.unwrap();
         create_upcoming_slots(&pool, Utc::now()).await.unwrap();
         sqlx::query("INSERT INTO users (name) VALUES ('Existing player')")
             .execute(&pool)
             .await
             .unwrap();
+        let slot_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM slots WHERE julianday(datetime) > julianday(?) ORDER BY julianday(datetime) DESC, id DESC LIMIT 1",
+        )
+        .bind(Utc::now().to_rfc3339())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO bookings (slot_id, user_id, position, is_waitlist) VALUES (?, (SELECT id FROM users WHERE name = 'Existing player'), 1, 0)")
+            .bind(slot_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO preview_seed (id) VALUES (1)")
+            .execute(&pool)
+            .await
+            .unwrap();
         seed_preview_roster(&pool).await.unwrap();
-        let counts: (i64, i64) =
-            sqlx::query_as("SELECT (SELECT count(*) FROM users), (SELECT count(*) FROM bookings)")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(counts, (1, 0));
+        let counts: (i64, i64) = sqlx::query_as(
+            "SELECT SUM(is_waitlist = 0), SUM(is_waitlist = 1) FROM bookings WHERE slot_id = ?",
+        )
+        .bind(slot_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(counts, (15, 2));
+        let existing: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM bookings b JOIN users u ON u.id = b.user_id
+             WHERE b.slot_id = ? AND u.name = 'Existing player' AND b.position = 1 AND b.is_waitlist = 0",
+        )
+        .bind(slot_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(existing, 1);
     }
 
     #[tokio::test]

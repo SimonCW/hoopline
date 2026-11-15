@@ -29,9 +29,11 @@ This stops this checkout's dev server on port 5050 before starting the preview.
 New databases start with no players or bookings. Recurring schedules still
 create games. Set `PREVIEW_SAMPLE=1` to add 15 players and two waitlisted
 members to the farthest upcoming game. Other upcoming games get a few random
-players. This also works with a file database. The app adds the rosters only once,
-and only if the database has no players or bookings. It keeps the sample data
-in a file database after a restart, even if `PREVIEW_SAMPLE` is later removed.
+players. This also works with a file database. On each startup with
+`PREVIEW_SAMPLE=1`, the app fills missing places with sample members. It keeps
+existing users and bookings. Sample data remains in a file database after a
+restart, even if `PREVIEW_SAMPLE` is later removed. Do not enable this setting
+for a database that contains real bookings.
 Run `just stop-dev` to stop that server without starting a new one.
 The `just preview` and `just healthcheck` commands use `admin` as the local
 admin password unless `ADMIN_PASSWORD` is already set.
