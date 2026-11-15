@@ -2,6 +2,47 @@ import { test, expect } from './fixtures.js';
 
 test.use({ serviceWorkers: 'allow' });
 
+test.describe('joining a full game', () => {
+  test.use({ seedProfile: 'last-spot' });
+
+  for (const permission of ['granted', 'denied']) {
+    test(`requests permission and saves the waitlist booking when ${permission}`, async ({ app }) => {
+      const player = await app.newActor('Scenario Bob');
+      await player.card.getByRole('button', { name: 'Sign Up', exact: true }).click();
+      await expect(player.card.getByTestId('booking-status')).toHaveText('Confirmed 🏀');
+      const actor = await app.newActor('Scenario Alice');
+      await actor.context.addInitScript(result => {
+        const registration = {
+          active: {},
+          pushManager: {
+            getSubscription: async () => null,
+            subscribe: async () => ({ toJSON: () => ({ endpoint: 'stub' }) }),
+          },
+        };
+        const notification = { permission: 'default', requestPermission: () => {
+          window.permissionRequests = (window.permissionRequests || 0) + 1;
+          notification.permission = result;
+          return Promise.resolve(result);
+        } };
+        Object.defineProperty(window, 'Notification', { value: notification, configurable: true });
+        Object.defineProperty(window, 'PushManager', { value: class {}, configurable: true });
+        Object.defineProperty(navigator, 'serviceWorker', {
+          value: { register: async () => registration, ready: Promise.resolve(registration) }, configurable: true,
+        });
+      }, permission);
+      await actor.page.route('**/push/status', route => route.fulfill({
+        json: { available: true, state: 'unregistered', public_key: 'AQID' },
+      }));
+      await actor.page.reload();
+      await expect(actor.page.locator('#push-controls')).toBeVisible();
+      await expect(actor.card.getByText('We’ll ask to notify you if a place opens.')).toBeVisible();
+      await actor.card.getByRole('button', { name: 'Join Waitlist' }).click();
+      await expect(actor.card.getByTestId('booking-status')).toContainText('Waitlist');
+      expect(await actor.page.evaluate(() => window.permissionRequests)).toBe(1);
+    });
+  }
+});
+
 test('the online-only PWA registers its local worker and serves its manifest', async ({ app }) => {
   const actor = await app.newActor('Scenario Alice');
   const result = await actor.page.evaluate(async () => {
@@ -71,7 +112,7 @@ test('restored pages still submit one booking after granted-permission preparati
   expect(new URLSearchParams(body).get('push_subscription')).toContain('fcm.googleapis.com');
 });
 
-test('alert setup holds the shared request lock', async ({ app }) => {
+test('booking preparation holds the shared request lock', async ({ app }) => {
   const actor = await app.newActor('Scenario Alice');
   await actor.context.addInitScript(() => {
     const registration = {
@@ -90,20 +131,13 @@ test('alert setup holds the shared request lock', async ({ app }) => {
   await actor.page.route('**/push/status', route => route.fulfill({
     json: { available: true, state: 'unregistered', public_key: 'AQID' },
   }));
-  await actor.page.route('**/push/subscribe', route => route.fulfill({ status: 200, json: {} }));
   await actor.page.reload();
-  let refreshes = 0;
-  await actor.page.route('**/slots/fragment*', async route => {
-    refreshes += 1;
-    await route.continue();
-  });
-  await actor.page.getByRole('button', { name: 'Enable promotion alerts' }).click();
-  await expect(actor.page.getByRole('button', { name: 'Turn off alerts on this device' })).toBeDisabled();
+  await actor.page.getByTestId('slot-card').first().getByRole('button', { name: 'Sign Up', exact: true }).click();
+  await expect.poll(() => actor.page.evaluate(() => typeof window.finishPreparation)).toBe('function');
   await expect(actor.page.getByRole('button', { name: 'Log out' })).toBeDisabled();
   await expect(actor.page.getByTestId('slot-card').first().getByRole('button', { name: 'Sign Up', exact: true })).toBeDisabled();
   await actor.page.evaluate(() => window.finishPreparation());
   await expect(actor.page.getByRole('button', { name: 'Log out' })).toBeEnabled();
-  await expect.poll(() => refreshes).toBe(1);
 });
 
 test('identity refresh replaces the device status and displayed member', async ({ app }) => {
@@ -128,7 +162,7 @@ test('identity refresh replaces the device status and displayed member', async (
   await expect(actor.page.locator('.identity-name')).toHaveText('Scenario Bob');
   await expect(actor.page.locator('#push-controls')).toHaveAttribute('data-user-id', '1002');
   await expect(actor.page.locator('#push-status')).not.toContainText('on for');
-  await expect(actor.page.getByRole('button', { name: 'Enable promotion alerts' })).toBeVisible();
+  await expect(actor.page.locator('#push-status')).toContainText('not active');
 });
 
 test('same-member refresh detects an expired endpoint before the next signup', async ({ app }) => {

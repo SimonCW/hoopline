@@ -78,8 +78,15 @@
             return;
         }
         const form = event.detail.elt;
-        if (!form.matches?.("form[data-signup]") || !window.HooplinePush?.shouldPrepare()) return;
+        const waitlist = form.matches?.("form[data-join-waitlist]");
+        if (!form.matches?.("form[data-signup]") || !window.HooplinePush?.shouldPrepare(waitlist)) return;
         event.preventDefault();
+        let permission;
+        try {
+            permission = waitlist ? window.HooplinePush.requestPermission() : Promise.resolve("granted");
+        } catch (_) {
+            permission = Promise.reject(new Error("Permission unavailable"));
+        }
         pending = true;
         const generation = pageGeneration;
         form.querySelectorAll("[data-push-preparation]").forEach(input => input.remove());
@@ -87,8 +94,15 @@
         const status = document.getElementById("booking-request-status");
         status.textContent = "Preparing booking. Booking controls are temporarily unavailable.";
         status.hidden = false;
-        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000));
-        Promise.race([window.HooplinePush.prepare(), timeout]).then(subscription => {
+        let timedOut = false;
+        const timeout = new Promise((_, reject) => setTimeout(() => {
+            timedOut = true;
+            reject(new Error("timeout"));
+        }, 10000));
+        Promise.race([Promise.resolve(permission).then(result => {
+            if (result !== "granted" || timedOut) throw new Error("Permission not granted");
+            return window.HooplinePush.prepare(waitlist);
+        }), timeout]).then(subscription => {
             if (leaving || generation !== pageGeneration || !form.isConnected || !subscription) return;
             const input = document.createElement("input");
             input.type = "hidden";
@@ -184,7 +198,7 @@
             window.HooplinePush?.refreshStatus().then(() => {
                 if (feedback.textContent.includes("Alerts could not be enabled")) {
                     const pushStatus = document.getElementById("push-status");
-                    if (pushStatus) pushStatus.textContent = "Booking saved. Alerts could not be enabled. Try again.";
+                    if (pushStatus) pushStatus.textContent = "Booking saved. Alerts could not be enabled. Check your booking here.";
                 }
             });
         }
