@@ -28,7 +28,6 @@
         <form data-signup {% if slot.players.len() >= slot.max_players %}data-join-waitlist{% endif %} hx-post="/slots/{{ slot.id }}/signup{% if admin_mode %}?mode=admin{% endif %}">
             <button id="slot-action-{{ slot.id }}" type="submit" class="btn btn-primary">{{ slot.signup_action_label() }}</button>
         </form>
-        {% if slot.players.len() >= slot.max_players %}<p class="muted">We’ll ask to notify you if a place opens.</p>{% endif %}
         {% else %}
         <p>Player list and waitlist are full.</p>
         {% endif %}
@@ -37,7 +36,7 @@
     <p class="muted">Check your booking here. Promotion alerts may not arrive.</p>
     {% endif %}
     {% if !feedback.is_empty() %}
-    <p class="sr-only" data-feedback>{{ feedback }}</p>
+    <p class="{% if feedback.contains("Alerts could not be enabled") %}muted{% else %}sr-only{% endif %}" data-feedback>{{ feedback }}</p>
     {% endif %}
     <p class="request-error" role="alert" tabindex="-1" hidden></p>
     {% if admin_mode %}

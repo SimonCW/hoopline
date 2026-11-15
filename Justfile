@@ -51,7 +51,7 @@ stop-dev:
   echo "Port 5050 is still in use." >&2
   exit 1
 
-# Start a disposable preview with a full game and three people waiting.
+# Start a disposable preview with a full game and two people waiting.
 preview: stop-dev
   ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin}" DATABASE_URL=sqlite::memory: PREVIEW_SAMPLE=1 PORT=5050 cargo run
 

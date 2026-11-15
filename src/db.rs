@@ -326,7 +326,7 @@ pub async fn create_upcoming_slots(
     Ok(report.created)
 }
 
-/// Adds a full example roster once to an empty preview database.
+/// Adds example rosters once to an empty preview database.
 ///
 /// # Errors
 /// Returns an error if the example data cannot be written.
@@ -371,7 +371,6 @@ pub(crate) async fn seed_preview_roster(pool: &SqlitePool) -> Result<(), sqlx::E
         "Omar Ali",
         "Paul Meyer",
         "Samira Ahmed",
-        "Theo Martin",
     ];
     for (offset, name) in names.iter().enumerate() {
         let index = i64::try_from(offset).expect("preview roster index fits in i64") + 1;
@@ -386,6 +385,25 @@ pub(crate) async fn seed_preview_roster(pool: &SqlitePool) -> Result<(), sqlx::E
         .bind(user_id)
         .bind(if index <= 15 { index } else { index - 15 })
         .bind(i64::from(index > 15))
+        .execute(&mut *tx)
+        .await?;
+    }
+    let other_slots: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT id, MIN(max_players, 3 + abs(random() % 5))
+         FROM slots WHERE id != ? AND julianday(datetime) > julianday(?)",
+    )
+    .bind(slot_id)
+    .bind(crate::clock::now().to_rfc3339())
+    .fetch_all(&mut *tx)
+    .await?;
+    for (other_slot, player_count) in other_slots {
+        sqlx::query(
+            "INSERT INTO bookings (slot_id, user_id, position, is_waitlist)
+             SELECT ?, id, row_number() OVER (), 0
+             FROM (SELECT id FROM users ORDER BY random() LIMIT ?)",
+        )
+        .bind(other_slot)
+        .bind(player_count)
         .execute(&mut *tx)
         .await?;
     }
@@ -1389,17 +1407,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn preview_has_a_full_game_with_three_waiting() {
+    async fn preview_has_a_full_game_with_two_waiting() {
         let pool = init_pool("sqlite::memory:").await.unwrap();
         create_upcoming_slots(&pool, chrono::Utc::now())
             .await
             .unwrap();
         seed_preview_roster(&pool).await.unwrap();
         let row: (i64, i64) = sqlx::query_as(
-            "SELECT SUM(b.is_waitlist = 0), SUM(b.is_waitlist = 1) FROM bookings b JOIN slots s ON s.id = b.slot_id WHERE s.schedule_id IS NOT NULL GROUP BY s.id HAVING SUM(b.is_waitlist = 0) = 15 AND SUM(b.is_waitlist = 1) = 3",
+            "SELECT SUM(b.is_waitlist = 0), SUM(b.is_waitlist = 1) FROM bookings b JOIN slots s ON s.id = b.slot_id WHERE s.schedule_id IS NOT NULL GROUP BY s.id HAVING SUM(b.is_waitlist = 0) = 15 AND SUM(b.is_waitlist = 1) = 2",
         )
         .fetch_one(&pool).await.unwrap();
-        assert_eq!(row, (15, 3));
+        assert_eq!(row, (15, 2));
     }
 
     #[tokio::test]
@@ -1415,11 +1433,25 @@ mod tests {
         .await
         .unwrap();
         seed_preview_roster(&pool).await.unwrap();
-        let booked_slot: i64 = sqlx::query_scalar("SELECT slot_id FROM bookings LIMIT 1")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(booked_slot, slot_id);
+        let counts: (i64, i64) = sqlx::query_as(
+            "SELECT SUM(is_waitlist = 0), SUM(is_waitlist = 1) FROM bookings WHERE slot_id = ?",
+        )
+        .bind(slot_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(counts, (15, 2));
+        let other_counts: Vec<i64> = sqlx::query_scalar(
+            "SELECT count(b.id) FROM slots s LEFT JOIN bookings b ON b.slot_id = s.id
+             WHERE s.id != ? AND julianday(s.datetime) > julianday(?) GROUP BY s.id",
+        )
+        .bind(slot_id)
+        .bind(Utc::now().to_rfc3339())
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_ne!(other_counts, [] as [i64; 0]);
+        assert!(other_counts.iter().all(|count| (3..=7).contains(count)));
     }
 
     #[tokio::test]
@@ -1438,7 +1470,8 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(counts, (18, 18));
+        assert_eq!(counts.0, 17);
+        assert!(counts.1 >= 17);
         sqlx::query("DELETE FROM bookings")
             .execute(&pool)
             .await

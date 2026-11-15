@@ -519,7 +519,7 @@ async fn signup_slot(
     let alerts_feedback = if outcome == SignupOutcome::AddedWaitlist
         && (setup_failed || registration == Some(push::BindOutcome::Unavailable))
     {
-        " Alerts could not be enabled. Try again."
+        " Alerts could not be enabled. Check your booking here."
     } else if registration == Some(push::BindOutcome::Registered) {
         " Promotion alerts are on for this device."
     } else {
