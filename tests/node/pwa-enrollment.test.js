@@ -42,12 +42,13 @@ test("existing subscription is reused", async () => {
     assert.equal(calls.length, 0);
 });
 
-test("explicit off and default permission do not prepare subscriptions", async () => {
+test("waitlist signup can request permission and reenable a device", async () => {
     const disabled = await page({ state: "disabled" });
-    assert.equal(disabled.push.shouldPrepare(), false);
+    assert.equal(disabled.push.shouldPrepare(true), true);
     assert.equal(await disabled.push.prepare(), null);
     assert.equal(await disabled.push.prepare(true), '{"endpoint":"test"}');
     assert.equal((await page({ permission: "default" })).push.shouldPrepare(), false);
+    assert.equal((await page({ permission: "default" })).push.shouldPrepare(true), true);
 });
 
 test("expired registration replaces the stale subscription", async () => {

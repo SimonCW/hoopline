@@ -74,10 +74,10 @@ Hoopline from the Home Screen. Select your name again there; browser storage
 may not transfer. Installation is optional and does not grant notification
 permission. Booking needs an internet connection.
 
-When alerts are configured, use **Enable promotion alerts** on the games page.
-If permission is already granted, joining a waitlist also registers this device.
-Use **Turn off alerts on this device** to prevent automatic registration until
-you enable alerts again. Each device has its own setting. Delivery is best effort:
+When alerts are configured, joining a waitlist asks for notification permission
+and registers this device. The booking succeeds even if alerts are unavailable
+or permission is refused. Change permission in your browser settings. Each
+device has its own permission. Delivery is best effort:
 the push provider may accept an alert without the player seeing it. A push
 cannot be recalled after the provider accepts it. Check the roster for changes.
 

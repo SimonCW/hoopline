@@ -454,7 +454,7 @@ pub(crate) async fn bind(
     member_id: i64,
     binding: &Binding,
 ) -> Result<BindOutcome, sqlx::Error> {
-    bind_with_preference(tx, member_id, binding, false).await
+    bind_with_preference(tx, member_id, binding, true).await
 }
 
 async fn bind_with_preference(
@@ -1130,7 +1130,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn explicit_off_and_device_limit_do_not_block_booking() {
+    async fn waitlist_signup_reenables_device_and_respects_device_limit() {
         let pool = fixture().await;
         let first = binding(1, "https://fcm.googleapis.com/first");
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
@@ -1143,7 +1143,7 @@ mod tests {
         let result = signup_with_push(&pool, 1, 2, Some(&first)).await.unwrap();
         assert_eq!(
             result,
-            (SignupOutcome::AddedWaitlist, Some(BindOutcome::Unavailable))
+            (SignupOutcome::AddedWaitlist, Some(BindOutcome::Registered))
         );
 
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
@@ -1187,7 +1187,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn binding_database_failure_rolls_back_waitlist_booking() {
+    async fn binding_database_failure_preserves_waitlist_booking() {
         let pool = fixture().await;
         sqlx::raw_sql(
             "CREATE TRIGGER fail_binding BEFORE INSERT ON push_devices
@@ -1197,7 +1197,10 @@ mod tests {
         .await
         .unwrap();
         let binding = binding(1, "https://fcm.googleapis.com/first");
-        assert!(signup_with_push(&pool, 1, 2, Some(&binding)).await.is_err());
+        assert_eq!(
+            signup_with_push(&pool, 1, 2, Some(&binding)).await.unwrap(),
+            (SignupOutcome::AddedWaitlist, Some(BindOutcome::Unavailable))
+        );
         let bookings: i64 = sqlx::query_scalar("SELECT count(*) FROM bookings WHERE user_id = 2")
             .fetch_one(&pool)
             .await
@@ -1206,6 +1209,6 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!((bookings, activity), (0, 0));
+        assert_eq!((bookings, activity), (1, 1));
     }
 }

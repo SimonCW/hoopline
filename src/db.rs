@@ -702,7 +702,7 @@ pub(crate) async fn signup_with_push(
         )
         .await?;
         let binding_result = if let Some(binding) = binding {
-            Some(crate::push::bind(&mut tx, user_id, binding).await?)
+            Some(bind_without_blocking_booking(&mut tx, user_id, binding).await?)
         } else {
             None
         };
@@ -711,6 +711,26 @@ pub(crate) async fn signup_with_push(
     }
 
     Ok((SignupOutcome::Full, None))
+}
+
+async fn bind_without_blocking_booking(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: i64,
+    binding: &crate::push::Binding,
+) -> Result<crate::push::BindOutcome, sqlx::Error> {
+    sqlx::query("SAVEPOINT push_binding")
+        .execute(&mut **tx)
+        .await?;
+    let result = crate::push::bind(tx, user_id, binding).await;
+    if result.is_err() {
+        sqlx::query("ROLLBACK TO push_binding")
+            .execute(&mut **tx)
+            .await?;
+    }
+    sqlx::query("RELEASE push_binding")
+        .execute(&mut **tx)
+        .await?;
+    Ok(result.unwrap_or(crate::push::BindOutcome::Unavailable))
 }
 
 /// Cancels a user's booking and promotes waitlist #1 when needed.
@@ -856,26 +876,7 @@ async fn promote_first_waiter(
         .execute(&mut **tx)
         .await?;
 
-        if actor_user_id.is_some() {
-            let now = crate::clock::now().timestamp();
-            sqlx::query(
-                "INSERT INTO push_jobs
-                    (kind, device_id, generation, user_id, booking_id,
-                     created_at, next_attempt_at, expires_at)
-                 SELECT 'waitlist_promoted', d.id, d.generation, b.user_id, b.id,
-                        ?, ?, MIN(unixepoch(s.datetime), ?)
-                 FROM bookings b
-                 JOIN slots s ON s.id = b.slot_id
-                 JOIN push_devices d ON d.user_id = b.user_id
-                 WHERE b.id = ? AND d.enabled = 1 AND d.endpoint IS NOT NULL",
-            )
-            .bind(now)
-            .bind(now)
-            .bind(now + 30 * 60)
-            .bind(promoted_booking_id)
-            .execute(&mut **tx)
-            .await?;
-        }
+        enqueue_promotion(tx, promoted_booking_id).await?;
 
         sqlx::query(
             "UPDATE bookings
@@ -888,6 +889,31 @@ async fn promote_first_waiter(
         .await?;
     }
 
+    Ok(())
+}
+
+async fn enqueue_promotion(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    booking_id: i64,
+) -> Result<(), sqlx::Error> {
+    let now = crate::clock::now().timestamp();
+    sqlx::query(
+        "INSERT INTO push_jobs
+                    (kind, device_id, generation, user_id, booking_id,
+                     created_at, next_attempt_at, expires_at)
+                 SELECT 'waitlist_promoted', d.id, d.generation, b.user_id, b.id,
+                        ?, ?, MIN(unixepoch(s.datetime), ?)
+                 FROM bookings b
+                 JOIN slots s ON s.id = b.slot_id
+                 JOIN push_devices d ON d.user_id = b.user_id
+                 WHERE b.id = ? AND d.enabled = 1 AND d.endpoint IS NOT NULL",
+    )
+    .bind(now)
+    .bind(now)
+    .bind(now + 30 * 60)
+    .bind(booking_id)
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
@@ -965,6 +991,8 @@ pub(crate) async fn promote_waitlist_checked(
     .bind(booking_id)
     .execute(&mut *tx)
     .await?;
+
+    enqueue_promotion(&mut tx, booking_id).await?;
 
     sqlx::query(
         "UPDATE bookings
@@ -1247,7 +1275,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn admin_promotion_does_not_enqueue_a_job() {
+    async fn admin_removal_enqueues_a_promotion_job() {
         let pool = promotion_fixture().await;
         super::cancel_booking_checked(&pool, 1, 1, None)
             .await
@@ -1256,7 +1284,24 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count, 0);
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn admin_manual_promotion_enqueues_a_job() {
+        let pool = promotion_fixture().await;
+        sqlx::query("DELETE FROM bookings WHERE user_id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        super::promote_waitlist_checked(&pool, 1, 2, None)
+            .await
+            .unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM push_jobs")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[tokio::test]
