@@ -79,7 +79,18 @@
         }
         const form = event.detail.elt;
         const waitlist = form.matches?.("form[data-join-waitlist]");
-        if (!form.matches?.("form[data-signup]") || !window.HooplinePush?.shouldPrepare(waitlist)) return;
+        if (!form.matches?.("form[data-signup]")) return;
+        if (!window.HooplinePush?.shouldPrepare(waitlist)) {
+            if (waitlist) {
+                const input = document.createElement("input");
+                input.type = "hidden";
+                input.name = "push_failed";
+                input.dataset.pushPreparation = "";
+                input.value = "1";
+                form.append(input);
+            }
+            return;
+        }
         event.preventDefault();
         let permission;
         try {
@@ -195,12 +206,7 @@
         if (feedback) {
             announce(feedback.textContent);
             target.querySelector("h3")?.focus({ preventScroll: true });
-            window.HooplinePush?.refreshStatus().then(() => {
-                if (feedback.textContent.includes("Alerts could not be enabled")) {
-                    const pushStatus = document.getElementById("push-status");
-                    if (pushStatus) pushStatus.textContent = "Booking saved. Alerts could not be enabled. Check your booking here.";
-                }
-            });
+            window.HooplinePush?.refreshStatus();
         }
         if (target.id === "slots-content" && focusAfterSwap) {
             document.getElementById("refresh-slots")?.focus({ preventScroll: true });

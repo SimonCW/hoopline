@@ -34,11 +34,15 @@ test.describe('joining a full game', () => {
         json: { available: true, state: 'unregistered', public_key: 'AQID' },
       }));
       await actor.page.reload();
-      await expect(actor.page.locator('#push-controls')).toBeVisible();
-      await expect(actor.card.getByText('We’ll ask to notify you if a place opens.')).toBeVisible();
+      await expect(actor.page.locator('#push-controls')).toBeHidden();
+      await expect(actor.page.getByRole('heading', { name: 'Promotion alerts' })).toHaveCount(0);
       await actor.card.getByRole('button', { name: 'Join Waitlist' }).click();
       await expect(actor.card.getByTestId('booking-status')).toContainText('Waitlist');
       expect(await actor.page.evaluate(() => window.permissionRequests)).toBe(1);
+      if (permission === 'denied') {
+        await expect(actor.card.locator('[data-feedback]')).toContainText('Alerts could not be enabled');
+        await expect(actor.card.locator('[data-feedback]')).toBeVisible();
+      }
     });
   }
 });
@@ -92,7 +96,7 @@ test('restored pages still submit one booking after granted-permission preparati
     json: { available: true, state: 'unregistered', public_key: 'AQID' },
   }));
   await actor.page.reload();
-  await expect(actor.page.locator('#push-controls')).toBeVisible();
+  await expect(actor.page.locator('#push-controls')).toBeHidden();
   await actor.page.evaluate(() => {
     window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
@@ -155,14 +159,13 @@ test('identity refresh replaces the device status and displayed member', async (
     json: { available: true, state, public_key: 'AQID' },
   }));
   await actor.page.reload();
-  await expect(actor.page.locator('#push-status')).toContainText('on for Scenario Alice');
+  await expect(actor.page.locator('#push-controls')).toHaveAttribute('data-user-id', '1001');
   state = 'unregistered';
   await actor.context.addCookies([{ name: 'user_id', value: '1002', url: app.baseURL }]);
   await actor.page.getByRole('button', { name: 'Refresh slots' }).click();
   await expect(actor.page.locator('.identity-name')).toHaveText('Scenario Bob');
   await expect(actor.page.locator('#push-controls')).toHaveAttribute('data-user-id', '1002');
-  await expect(actor.page.locator('#push-status')).not.toContainText('on for');
-  await expect(actor.page.locator('#push-status')).toContainText('not active');
+  await expect(actor.page.locator('#push-controls')).toBeHidden();
 });
 
 test('same-member refresh detects an expired endpoint before the next signup', async ({ app }) => {
@@ -187,10 +190,11 @@ test('same-member refresh detects an expired endpoint before the next signup', a
     json: { available: true, state, public_key: 'AQID' },
   }));
   await actor.page.reload();
-  await expect(actor.page.locator('#push-status')).toContainText('on for Scenario Alice');
+  await expect(actor.page.locator('#push-controls')).toBeHidden();
   state = 'expired';
+  const refreshed = actor.page.waitForResponse('**/push/status');
   await actor.page.getByRole('button', { name: 'Refresh slots' }).click();
-  await expect(actor.page.locator('#push-status')).not.toContainText('on for');
+  await refreshed;
   await actor.page.getByTestId('slot-card').first().getByRole('button', { name: 'Sign Up', exact: true }).click();
   await expect(actor.page.getByTestId('slot-card').first().getByTestId('booking-status')).toHaveText('Confirmed 🏀');
   expect(await actor.page.evaluate(() => window.unsubscribed)).toBe(true);
@@ -216,7 +220,7 @@ test('restoring during preparation drains the queued roster refresh without book
     json: { available: true, state: 'unregistered', public_key: 'AQID' },
   }));
   await actor.page.reload();
-  await expect(actor.page.locator('#push-controls')).toBeVisible();
+  await expect(actor.page.locator('#push-controls')).toBeHidden();
   let signups = 0;
   let refreshes = 0;
   await actor.page.route('**/slots/*/signup', async route => { signups += 1; await route.continue(); });

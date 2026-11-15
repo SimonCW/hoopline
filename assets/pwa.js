@@ -2,7 +2,6 @@
     let status = null;
     let statusSequence = 0;
     const controls = document.getElementById("push-controls");
-    const statusText = document.getElementById("push-status");
     const worker = "serviceWorker" in navigator
         ? navigator.serviceWorker.register("/sw.js")
             .then(() => navigator.serviceWorker.ready).catch(() => null) : Promise.resolve(null);
@@ -23,38 +22,6 @@
         } finally {
             clearTimeout(timeout);
         }
-        await renderStatus();
-    }
-
-    async function renderStatus() {
-        if (!controls) return;
-        const sequence = statusSequence;
-        const identity = document.getElementById("user-selector")?.dataset.userId;
-        if (identity && identity !== controls.dataset.userId) {
-            controls.hidden = true;
-            return;
-        }
-        controls.hidden = !identity;
-        if (controls.hidden) return;
-        const supported = "Notification" in window && "PushManager" in window && "serviceWorker" in navigator;
-        const permission = supported ? Notification.permission : "unsupported";
-        let active = false;
-        if (status?.state === "registered" && permission === "granted") {
-            try {
-                const registration = await Promise.race([
-                    worker,
-                    new Promise(resolve => setTimeout(() => resolve(null), 3000))
-                ]);
-                active = !!(await registration?.pushManager.getSubscription());
-            } catch (_) { /* Offer setup again. */ }
-        }
-        if (sequence !== statusSequence || identity !== document.getElementById("user-selector")?.dataset.userId) return;
-        const name = document.querySelector(".identity-name")?.textContent?.replace(/ \| Admin$/, "") || "you";
-        statusText.textContent = !status?.available ? "Alerts are unavailable. Check your booking here."
-            : !supported ? "This browser cannot receive alerts. Check your booking here."
-            : permission === "denied" ? "Alerts are blocked. Change notification permission in your browser settings."
-                    : active ? `Promotion alerts are on for ${name} on this device.`
-                        : "Alerts are not active on this device. Check your booking here.";
     }
     const initialStatus = refreshStatus();
 
@@ -93,7 +60,6 @@
     };
 
     if (controls) {
-        document.body.addEventListener("htmx:afterSwap", () => { renderStatus(); });
         document.body.addEventListener("htmx:afterSettle", event => {
             if (event.detail.target?.id !== "slots-content") return;
             const identity = document.getElementById("user-selector")?.dataset.userId;
