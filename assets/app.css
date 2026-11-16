@@ -24,6 +24,9 @@ a { color: var(--accent); }
 .app-shell { max-width: 70rem; margin: auto; padding: 1rem; }
 .card { background: white; border: 1px solid #d9e2dd; border-radius: 1rem; padding: 1rem; }
 .welcome-shell { max-width: 28rem; margin: 8svh auto 2rem; }
+.install-guidance, .alert-setup { margin-bottom: 1rem; }
+.install-guidance h2, .alert-setup h2 { font-size: 1.1rem; }
+.install-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .welcome-card { padding: 1.5rem; }
 .welcome-intro { color: var(--muted); margin: .5rem 0 1rem; }
 .welcome-card .identity-form { gap: .75rem; }

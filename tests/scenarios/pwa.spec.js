@@ -2,6 +2,95 @@ import { test, expect } from './fixtures.js';
 
 test.use({ serviceWorkers: 'allow' });
 
+test('install guidance is dismissible and hidden in standalone mode', async ({ page }) => {
+  await page.goto('/');
+  const guidance = page.locator('#install-guidance');
+  await expect(guidance).toBeVisible();
+  await guidance.getByRole('button', { name: 'Continue in browser' }).click();
+  await expect(guidance).toBeHidden();
+  await page.reload();
+  await expect(guidance).toBeHidden();
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'standalone', { value: true, configurable: true });
+    sessionStorage.removeItem('hoopline-install-dismissed');
+  });
+  await page.reload();
+  await expect(guidance).toBeHidden();
+});
+
+test('explicit alert setup requests permission and confirms registration', async ({ app }) => {
+  const actor = await app.newActor('Scenario Alice');
+  await actor.context.addInitScript(() => {
+    const notification = { permission: 'default', requestPermission: async () => {
+      window.permissionRequests = (window.permissionRequests || 0) + 1;
+      notification.permission = 'granted';
+      return 'granted';
+    } };
+    Object.defineProperty(window, 'Notification', { value: notification, configurable: true });
+    Object.defineProperty(window, 'PushManager', { value: class {}, configurable: true });
+    const registration = { pushManager: {
+      getSubscription: async () => null,
+      subscribe: async () => ({ toJSON: () => ({ endpoint: 'stub' }) }),
+    } };
+    Object.defineProperty(navigator, 'serviceWorker', {
+      value: { register: async () => registration, ready: Promise.resolve(registration) }, configurable: true,
+    });
+  });
+  let state = 'unregistered';
+  await actor.page.route('**/push/status', route => route.fulfill({
+    json: { available: true, state, public_key: 'AQID' },
+  }));
+  let subscriptions = 0;
+  await actor.page.route('**/push/subscribe', route => {
+    subscriptions++;
+    return route.fulfill({ json: { available: true, state: 'registered', public_key: 'AQID' } });
+  });
+  await actor.page.reload();
+  await expect(actor.page.getByRole('button', { name: 'Enable promotion alerts' })).toBeVisible();
+  expect(await actor.page.evaluate(() => window.permissionRequests || 0)).toBe(0);
+  await actor.page.getByRole('button', { name: 'Enable promotion alerts' }).click();
+  await expect(actor.page.locator('#alert-setup-status')).toHaveText('Promotion alerts are on for this device.');
+  expect(subscriptions).toBe(1);
+  expect(await actor.page.evaluate(() => window.permissionRequests)).toBe(1);
+  state = 'expired';
+  await actor.page.evaluate(() => window.HooplinePush.refreshStatus());
+  await expect(actor.page.getByRole('button', { name: 'Enable promotion alerts' })).toBeVisible();
+  await expect(actor.page.locator('#alert-setup-status')).toBeEmpty();
+});
+
+test('stalled alert setup releases booking controls and ignores late preparation', async ({ app }) => {
+  const actor = await app.newActor('Scenario Alice');
+  await actor.page.route('**/push/status', route => route.fulfill({
+    json: { available: true, state: 'unregistered', public_key: 'AQID' },
+  }));
+  await actor.page.reload();
+  await actor.page.evaluate(() => {
+    Object.defineProperty(window, 'Notification', { value: { permission: 'granted' }, configurable: true });
+    Object.defineProperty(window, 'PushManager', { value: class {}, configurable: true });
+    window.HooplinePush.prepare = () => new Promise(resolve => { window.finishPreparation = resolve; });
+  });
+  await actor.page.evaluate(() => window.HooplinePush.refreshStatus());
+  await actor.page.clock.install();
+  let subscriptions = 0;
+  await actor.page.route('**/push/subscribe', route => { subscriptions++; return route.abort(); });
+  await actor.page.getByRole('button', { name: 'Enable promotion alerts' }).click();
+  await expect(actor.page.locator('#refresh-slots')).toBeDisabled();
+  await actor.page.clock.fastForward(10001);
+  await expect(actor.page.locator('#alert-setup-status')).toHaveText('Alerts could not be enabled. Try again.');
+  await expect(actor.page.locator('#refresh-slots')).toBeEnabled();
+  await actor.page.evaluate(() => window.finishPreparation('{"endpoint":"stub"}'));
+  expect(subscriptions).toBe(0);
+});
+
+test('alert setup respects an explicitly disabled device', async ({ app }) => {
+  const actor = await app.newActor('Scenario Alice');
+  await actor.page.route('**/push/status', route => route.fulfill({
+    json: { available: true, state: 'disabled', public_key: 'AQID' },
+  }));
+  await actor.page.reload();
+  await expect(actor.page.locator('#alert-setup')).toBeHidden();
+});
+
 test.describe('joining a full game', () => {
   test.use({ seedProfile: 'last-spot' });
 
@@ -35,7 +124,7 @@ test.describe('joining a full game', () => {
       }));
       await actor.page.reload();
       await expect(actor.page.locator('#push-controls')).toBeHidden();
-      await expect(actor.page.getByRole('heading', { name: 'Promotion alerts' })).toHaveCount(0);
+      await expect(actor.page.getByRole('heading', { name: 'Waitlist promotion alerts' })).toBeVisible();
       await actor.card.getByRole('button', { name: 'Join Waitlist' }).click();
       await expect(actor.card.getByTestId('booking-status')).toContainText('Waitlist');
       expect(await actor.page.evaluate(() => window.permissionRequests)).toBe(1);

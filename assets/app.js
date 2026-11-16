@@ -10,7 +10,7 @@
     const openRosters = new Set();
 
     function disableBookingControls() {
-        document.querySelectorAll('#slots-content button, #user-selector form button, #push-controls button, #refresh-slots, .admin-editor button').forEach(button => {
+        document.querySelectorAll('#slots-content button, #user-selector form button, #push-controls button, #enable-alerts, #refresh-slots, .admin-editor button').forEach(button => {
             // Only restore controls disabled by this request, not disabled slot states.
             if (!button.disabled) {
                 button.dataset.requestDisabled = "";
