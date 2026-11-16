@@ -74,10 +74,12 @@ Hoopline can be installed as an online-only web app. On iPhone or iPad, use
 **Share → Add to Home Screen**, select **Open as Web App** if offered, and open
 Hoopline from the Home Screen. Select your name again there; browser storage
 may not transfer. Installation is optional and does not grant notification
-permission. Booking needs an internet connection.
+permission. Android Chrome can also receive alerts in a browser tab. Booking
+needs an internet connection.
 
-When alerts are configured, joining a waitlist asks for notification permission
-and registers this device. The booking succeeds even if alerts are unavailable
+When alerts are configured, select your name and choose **Enable promotion
+alerts** to grant permission and register this device. Joining a waitlist can
+also ask for permission and register this device. The booking succeeds even if alerts are unavailable
 or permission is refused. Change permission in your browser settings. Each
 device has its own permission. Delivery is best effort:
 the push provider may accept an alert without the player seeing it. A push

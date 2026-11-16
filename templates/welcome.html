@@ -2,6 +2,16 @@
 {% block title %}{{ title }} · Choose your name{% endblock %}
 {% block content %}
 <div class="welcome-shell">
+    <section id="install-guidance" class="card install-guidance" aria-labelledby="install-title" hidden>
+        <h2 id="install-title">Install Hoopline for waitlist alerts</h2>
+        <p>Get alerts when you move off the waitlist. Installation is optional, and alerts may not arrive.</p>
+        <p>On iPhone or iPad, choose Share → Add to Home Screen, select Open as Web App if offered, then open Hoopline from your Home Screen.</p>
+        <p>On other devices, use your browser's install or Add to Home Screen option. Select your name again in the installed app, then enable alerts.</p>
+        <div class="install-actions">
+            <button type="button" class="btn btn-primary" data-install-app hidden>Install Hoopline</button>
+            <button type="button" class="btn btn-secondary" id="dismiss-install">Continue in browser</button>
+        </div>
+    </section>
     {{ user_selector_html|safe }}
 </div>
 {% endblock %}

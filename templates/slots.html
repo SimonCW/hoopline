@@ -3,5 +3,11 @@
 {% block content %}
 {{ user_selector_html|safe }}
 <div id="push-controls" data-user-id="{{ current_user_id.unwrap_or_default() }}" data-available="{{ push_available }}" hidden></div>
+<section id="alert-setup" class="card alert-setup" aria-labelledby="alert-setup-title" hidden>
+    <h2 id="alert-setup-title">Waitlist promotion alerts</h2>
+    <p>Enable alerts on this device to hear when you move off the waitlist. Alerts may not arrive; check your booking here.</p>
+    <button type="button" id="enable-alerts" class="btn btn-secondary">Enable promotion alerts</button>
+    <p id="alert-setup-status" role="status" aria-live="polite"></p>
+</section>
 {% include "slots_content.html" %}
 {% endblock %}

@@ -18,7 +18,7 @@ async function page({ state = "unregistered", permission = "granted", existing =
         window,
         navigator: { serviceWorker: { register: async () => registration, ready: readyGate ? readyGate.then(() => registration) : Promise.resolve(registration) } },
         Notification: { permission },
-        document: { getElementById: id => id === "install-app" ? button : null },
+        document: { getElementById: () => null, querySelectorAll: () => [button] },
         fetch: async () => ({ ok: true, json: async () => ({ available: true, state, public_key: "AQID" }) }),
         atob, Uint8Array, AbortController, setTimeout, clearTimeout
     };
