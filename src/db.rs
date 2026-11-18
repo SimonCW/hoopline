@@ -81,6 +81,8 @@ pub(crate) async fn admin_add_member(
     if count >= capacity {
         return Err(AppError::BadRequest(Problem::SelectedListFull));
     }
+    let now = crate::clock::now();
+    crate::themes::settle_before_roster_edit(&mut tx, slot_id, now).await?;
     sqlx::query(
         "INSERT INTO bookings (slot_id, user_id, position, is_waitlist, created_at) VALUES (?, ?, ?, ?, ?)",
     )
@@ -88,7 +90,7 @@ pub(crate) async fn admin_add_member(
     .bind(user_id)
     .bind(count + 1)
     .bind(is_waitlist)
-    .bind(crate::clock::now().to_rfc3339_opts(SecondsFormat::Micros, true))
+    .bind(now.to_rfc3339_opts(SecondsFormat::Micros, true))
     .execute(&mut *tx)
     .await?;
     increment_slot_revision(&mut tx, slot_id).await?;
@@ -232,6 +234,7 @@ pub enum CancelOutcome {
     NotSignedUp,
     SlotNotFound,
     Stale,
+    Started,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -817,7 +820,10 @@ async fn cancel_booking(
     actor_user_id: Option<i64>,
 ) -> Result<CancelOutcome, sqlx::Error> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    if let Some(outcome) = cancellation_slot_status(&mut tx, slot_id, revision).await? {
+    let now = crate::clock::now();
+    if let Some(outcome) =
+        cancellation_slot_status(&mut tx, slot_id, revision, actor_user_id.map(|_| now)).await?
+    {
         return Ok(outcome);
     }
 
@@ -852,6 +858,7 @@ async fn cancel_booking(
             .await?,
         )
     } else {
+        crate::themes::settle_before_roster_edit(&mut tx, slot_id, crate::clock::now()).await?;
         None
     };
 
@@ -1035,6 +1042,7 @@ pub(crate) async fn promote_waitlist_checked(
     .fetch_one(&mut *tx)
     .await?;
 
+    crate::themes::settle_before_roster_edit(&mut tx, slot_id, crate::clock::now()).await?;
     sqlx::query(
         "UPDATE bookings
          SET is_waitlist = 0, position = ?
@@ -1077,11 +1085,15 @@ async fn cancellation_slot_status(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     slot_id: i64,
     revision: Option<i64>,
+    member_now: Option<DateTime<Utc>>,
 ) -> Result<Option<CancelOutcome>, sqlx::Error> {
-    let slot = sqlx::query("SELECT revision FROM slots WHERE id = ?")
-        .bind(slot_id)
-        .fetch_optional(&mut **tx)
-        .await?;
+    let slot = sqlx::query(
+        "SELECT revision, julianday(datetime) <= julianday(?) AS started FROM slots WHERE id = ?",
+    )
+    .bind(member_now.map(|now| now.to_rfc3339_opts(SecondsFormat::Micros, true)))
+    .bind(slot_id)
+    .fetch_optional(&mut **tx)
+    .await?;
     let Some(slot) = slot else {
         return Ok(Some(CancelOutcome::SlotNotFound));
     };
@@ -1089,6 +1101,9 @@ async fn cancellation_slot_status(
         && slot.try_get::<i64, _>("revision")? != revision
     {
         return Ok(Some(CancelOutcome::Stale));
+    }
+    if slot.try_get::<Option<bool>, _>("started")? == Some(true) {
+        return Ok(Some(CancelOutcome::Started));
     }
     Ok(None)
 }

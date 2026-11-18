@@ -41,6 +41,7 @@ problems! {
     SlotMissing: "slot does not exist", "Dieses Spiel gibt es nicht.";
     GameMissing: "Game does not exist.", "Dieses Spiel gibt es nicht.";
     SlotStarted: "This slot has started. Refresh to see upcoming slots.", "Dieses Spiel hat begonnen. Lade die Spiele neu, um die nächsten Spiele zu sehen.";
+    CancellationClosed: "This game has started. Cancellations are closed.", "Dieses Spiel hat begonnen. Du kannst deine Anmeldung nicht mehr zurückziehen.";
     NotSignedUp: "you are not signed up for this slot", "Du bist für dieses Spiel nicht angemeldet.";
     MemberNotSignedUp: "target user is not signed up for this slot", "Dieses Mitglied ist für dieses Spiel nicht angemeldet.";
     TargetNotWaiting: "target user is not on this waitlist", "Dieses Mitglied steht nicht auf der Warteliste.";

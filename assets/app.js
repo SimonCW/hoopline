@@ -240,3 +240,16 @@ if (themeSelect) {
         try { localStorage.setItem('hoopline-theme', themeSelect.value); } catch (_) { /* Keep the selection for this page. */ }
     });
 }
+
+document.querySelectorAll('[data-theme-award]').forEach(notice => {
+    const key = `hoopline-theme-award:${notice.dataset.themeAward}`;
+    try { notice.hidden = localStorage.getItem(key) === 'dismissed'; } catch (_) { /* Keep the notice visible. */ }
+    const dismiss = notice.querySelector('[data-dismiss-theme-award]');
+    dismiss.hidden = false;
+    dismiss.addEventListener('click', () => {
+        try { localStorage.setItem(key, 'dismissed'); } catch (_) { /* Dismiss for this page only. */ }
+        notice.hidden = true;
+        const next = document.querySelector('[data-theme-award]:not([hidden]) [data-dismiss-theme-award]');
+        (next || document.getElementById('main-content')).focus({ preventScroll: true });
+    });
+});
