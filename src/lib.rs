@@ -44,8 +44,8 @@ struct SlotsTemplate {
     title: String,
     current_user_id: Option<i64>,
     current_user_is_admin: bool,
-    push_available: bool,
     admin_mode: bool,
+    push_state: &'static str,
     generation_feedback: String,
     users: Vec<UserIdentity>,
     weeks: Vec<SlotWeek>,
@@ -65,6 +65,7 @@ struct SlotsContentTemplate {
     current_user_id: Option<i64>,
     current_user_is_admin: bool,
     admin_mode: bool,
+    push_state: &'static str,
     generation_feedback: String,
     users: Vec<UserIdentity>,
     weeks: Vec<SlotWeek>,
@@ -412,8 +413,10 @@ async fn index(
         title: "Hoopline".to_string(),
         current_user_id,
         current_user_is_admin,
-        push_available: push_config.origin.is_some(),
         admin_mode: view.admin_mode(current_user_is_admin),
+        push_state: push::device_state(&pool, &push_config, &headers, current_user_id)
+            .await
+            .unwrap_or("unavailable"),
         generation_feedback: String::new(),
         users: if view.admin_mode(current_user_is_admin) {
             list_users(&pool).await?
@@ -431,6 +434,7 @@ async fn index(
 
 async fn slots_fragment(
     State(pool): State<SqlitePool>,
+    Extension(push_config): Extension<push::Config>,
     Query(view): Query<ViewQuery>,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
@@ -445,6 +449,9 @@ async fn slots_fragment(
         current_user_id,
         current_user_is_admin,
         admin_mode: view.admin_mode(current_user_is_admin),
+        push_state: push::device_state(&pool, &push_config, &headers, current_user_id)
+            .await
+            .unwrap_or("unavailable"),
         generation_feedback: String::new(),
         users: if view.admin_mode(current_user_is_admin) {
             list_users(&pool).await?
@@ -667,6 +674,7 @@ async fn admin_generate_slots(
             report.created,
             report.warnings.join(" ")
         ),
+        push_state: "unavailable",
         users: list_users(&pool).await?,
         weeks: group_slots(list_slots(&pool).await?),
     };
@@ -754,6 +762,7 @@ async fn render_user_selector(
 
 async fn select_user(
     State(pool): State<SqlitePool>,
+    Extension(push_config): Extension<push::Config>,
     headers: HeaderMap,
     Form(form): Form<UserSelectionForm>,
 ) -> Result<Response, AppError> {
@@ -797,7 +806,7 @@ async fn select_user(
             .execute(&mut *tx)
             .await?;
     }
-    push::detach(&mut tx, &headers).await?;
+    let device_cookie = push::detach(&mut tx, &headers, &push_config).await?;
     let identity_cookie = user_cookie_header_value(selected_user_id)?;
     tx.commit().await?;
     let mut response = identity_redirect(&headers, "/slots");
@@ -807,6 +816,9 @@ async fn select_user(
     response
         .headers_mut()
         .append(header::SET_COOKIE, admin_cookie("", 0)?);
+    if let Some(cookie) = device_cookie {
+        response.headers_mut().append(header::SET_COOKIE, cookie);
+    }
     Ok(response)
 }
 
@@ -828,7 +840,11 @@ fn identity_redirect(headers: &HeaderMap, destination: &'static str) -> Response
     }
 }
 
-async fn logout(State(pool): State<SqlitePool>, headers: HeaderMap) -> Result<Response, AppError> {
+async fn logout(
+    State(pool): State<SqlitePool>,
+    Extension(push_config): Extension<push::Config>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     if let Some(token) = cookie_value(&headers, "admin_session") {
         sqlx::query("DELETE FROM admin_sessions WHERE token = ?")
@@ -836,7 +852,7 @@ async fn logout(State(pool): State<SqlitePool>, headers: HeaderMap) -> Result<Re
             .execute(&mut *tx)
             .await?;
     }
-    push::detach(&mut tx, &headers).await?;
+    let device_cookie = push::detach(&mut tx, &headers, &push_config).await?;
     tx.commit().await?;
     let mut response = identity_redirect(&headers, "/");
     response
@@ -845,6 +861,9 @@ async fn logout(State(pool): State<SqlitePool>, headers: HeaderMap) -> Result<Re
     response
         .headers_mut()
         .append(header::SET_COOKIE, admin_cookie("", 0)?);
+    if let Some(cookie) = device_cookie {
+        response.headers_mut().append(header::SET_COOKIE, cookie);
+    }
     Ok(response)
 }
 

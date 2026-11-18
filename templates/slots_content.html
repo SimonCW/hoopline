@@ -1,4 +1,4 @@
-<section id="slots-content" class="slots-content"
+<section id="slots-content" class="slots-content" data-push-state="{{ push_state }}"
     hx-get="/slots/fragment{% if admin_mode %}?mode=admin{% endif %}" hx-trigger="refresh-slots from:body"
     hx-swap="outerHTML" hx-sync="body:queue last" aria-labelledby="slots-heading">
     <h2 id="slots-heading" class="sr-only" tabindex="-1">Upcoming slots</h2>

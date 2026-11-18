@@ -6,7 +6,7 @@ mod sender;
 use axum::{
     Extension, Json,
     body::Bytes,
-    extract::State,
+    extract::{Query, State},
     http::{HeaderMap, HeaderValue, header},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -123,26 +123,32 @@ fn configuration(
     ))
 }
 
-fn token_hash(token: &str) -> Option<[u8; 32]> {
+fn device_token(value: &str) -> Option<(&str, [u8; 32], i64)> {
+    let (token, revision) = value.split_once('.').unwrap_or((value, "0"));
     if token.len() != 43 {
         return None;
     }
-    let token = URL_SAFE_NO_PAD.decode(token).ok()?;
-    (token.len() == 32).then(|| Sha256::digest(token).into())
+    let decoded = URL_SAFE_NO_PAD.decode(token).ok()?;
+    let revision: i64 = revision.parse().ok()?;
+    (decoded.len() == 32 && revision >= 0)
+        .then(|| (token, Sha256::digest(decoded).into(), revision))
 }
 
 pub(crate) fn device_cookie(headers: &HeaderMap, config: &Config) -> Option<HeaderValue> {
     if config.origin.is_none()
         || cookie_value(headers, "push_device")
-            .and_then(token_hash)
+            .and_then(device_token)
             .is_some()
     {
         return None;
     }
     let mut bytes = [0_u8; 32];
     getrandom::fill(&mut bytes).ok()?;
-    let token = URL_SAFE_NO_PAD.encode(bytes);
-    let secure = if config.secure_cookie { "; Secure" } else { "" };
+    device_cookie_header(&URL_SAFE_NO_PAD.encode(bytes), config.secure_cookie)
+}
+
+fn device_cookie_header(token: &str, secure: bool) -> Option<HeaderValue> {
+    let secure = if secure { "; Secure" } else { "" };
     HeaderValue::from_str(&format!(
         "push_device={token}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax{secure}"
     ))
@@ -151,18 +157,47 @@ pub(crate) fn device_cookie(headers: &HeaderMap, config: &Config) -> Option<Head
 
 fn owned_token(headers: &HeaderMap) -> Result<[u8; 32], AppError> {
     cookie_value(headers, "push_device")
-        .and_then(token_hash)
+        .and_then(device_token)
+        .map(|(_, hash, _)| hash)
         .ok_or_else(|| AppError::Forbidden("Device ownership is required.".into()))
 }
 
 pub(crate) async fn detach(
     tx: &mut Transaction<'_, Sqlite>,
     headers: &HeaderMap,
-) -> Result<(), sqlx::Error> {
-    let Some(hash) = cookie_value(headers, "push_device").and_then(token_hash) else {
-        return Ok(());
+    config: &Config,
+) -> Result<Option<HeaderValue>, sqlx::Error> {
+    if config.origin.is_none() {
+        return Ok(None);
+    }
+    let Some((token, hash, revision)) = cookie_value(headers, "push_device").and_then(device_token)
+    else {
+        return Ok(None);
     };
+    let Some(next) = revision.checked_add(1) else {
+        return Ok(None);
+    };
+    if !device_capacity_available(tx, &hash).await? {
+        return Ok(None);
+    }
     let now = crate::clock::now().timestamp();
+    let change = sqlx::query(
+        "INSERT INTO push_devices (token_hash, created_at, updated_at, identity_revision)
+         VALUES (?, ?, ?, ?) ON CONFLICT(token_hash) DO UPDATE SET
+             user_id = NULL, generation = generation + (user_id IS NOT NULL),
+             updated_at = excluded.updated_at, identity_revision = excluded.identity_revision
+         WHERE identity_revision = ?",
+    )
+    .bind(hash.as_slice())
+    .bind(now)
+    .bind(now)
+    .bind(next)
+    .bind(revision)
+    .execute(&mut **tx)
+    .await?;
+    if change.rows_affected() == 0 {
+        return Ok(None);
+    }
     sqlx::query(
         "UPDATE push_jobs SET status = 'skipped', completed_at = ?
          WHERE device_id = (SELECT id FROM push_devices WHERE token_hash = ?)
@@ -172,15 +207,10 @@ pub(crate) async fn detach(
     .bind(hash.as_slice())
     .execute(&mut **tx)
     .await?;
-    sqlx::query(
-        "UPDATE push_devices SET user_id = NULL, generation = generation + 1, updated_at = ?
-         WHERE token_hash = ? AND user_id IS NOT NULL",
-    )
-    .bind(now)
-    .bind(hash.as_slice())
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
+    Ok(device_cookie_header(
+        &format!("{token}.{next}"),
+        config.secure_cookie,
+    ))
 }
 
 pub(crate) fn check_origin(headers: &HeaderMap, config: &Config) -> Result<(), AppError> {
@@ -211,30 +241,8 @@ pub(crate) async fn status(
     Extension(config): Extension<Config>,
     headers: HeaderMap,
 ) -> Result<Json<Status>, AppError> {
-    let mut state = "unregistered";
-    if config.origin.is_some()
-        && let Some(hash) = cookie_value(&headers, "push_device").and_then(token_hash)
-        && let Some(row) =
-            sqlx::query("SELECT user_id, enabled, endpoint FROM push_devices WHERE token_hash = ?")
-                .bind(hash.as_slice())
-                .fetch_optional(&pool)
-                .await?
-    {
-        if row.try_get::<i64, _>("enabled")? == 0 {
-            state = "disabled";
-        } else {
-            let user = current_user_from_headers(&pool, &headers).await?;
-            if user.as_ref().map(|user| user.id) == row.try_get::<Option<i64>, _>("user_id")?
-                && user.is_some()
-            {
-                state = if row.try_get::<Option<String>, _>("endpoint")?.is_some() {
-                    "registered"
-                } else {
-                    "expired"
-                };
-            }
-        }
-    }
+    let user = current_user_from_headers(&pool, &headers).await?;
+    let state = device_state(&pool, &config, &headers, user.map(|user| user.id)).await?;
     Ok(Json(Status {
         available: config.origin.is_some(),
         public_key: config.public_key.clone(),
@@ -242,9 +250,50 @@ pub(crate) async fn status(
     }))
 }
 
+pub(crate) async fn device_state(
+    pool: &SqlitePool,
+    config: &Config,
+    headers: &HeaderMap,
+    member: Option<i64>,
+) -> Result<&'static str, sqlx::Error> {
+    if config.origin.is_none() {
+        return Ok("unavailable");
+    }
+    let Some((_, hash, revision)) = cookie_value(headers, "push_device").and_then(device_token)
+    else {
+        return Ok("unregistered");
+    };
+    let row = sqlx::query(
+        "SELECT user_id, enabled, endpoint, identity_revision FROM push_devices WHERE token_hash = ?",
+    )
+    .bind(hash.as_slice())
+    .fetch_optional(pool)
+    .await?;
+    Ok(match row {
+        Some(row) if row.get::<i64, _>("identity_revision") != revision => "unavailable",
+        Some(row) if row.get::<i64, _>("enabled") == 0 => "disabled",
+        Some(row) if member.is_some() && row.get::<Option<i64>, _>("user_id") == member => {
+            if row.get::<Option<String>, _>("endpoint").is_some() {
+                "registered"
+            } else {
+                "expired"
+            }
+        }
+        None if revision != 0 => "unavailable",
+        _ => "unregistered",
+    })
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct SubscribeQuery {
+    #[serde(default)]
+    automatic: bool,
+}
+
 pub(crate) async fn subscribe(
     State(pool): State<SqlitePool>,
     Extension(config): Extension<Config>,
+    Query(query): Query<SubscribeQuery>,
     user: BookingIdentity,
     headers: HeaderMap,
     body: Bytes,
@@ -257,7 +306,9 @@ pub(crate) async fn subscribe(
     let binding = Binding::parse(token, body)
         .ok_or_else(|| AppError::BadRequest("Invalid subscription.".into()))?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    if bind_with_preference(&mut tx, user.id(), &binding, true).await? != BindOutcome::Registered {
+    if bind_with_preference(&mut tx, user.id(), &binding, !query.automatic).await?
+        != BindOutcome::Registered
+    {
         return Err(AppError::BadRequest(
             "Alerts could not be enabled on this device.".into(),
         ));
@@ -379,6 +430,7 @@ struct Subscription {
 /// A validated browser subscription and the hash of its ownership token.
 pub(crate) struct Binding {
     token_hash: [u8; 32],
+    identity_revision: i64,
     endpoint: String,
     p256dh: String,
     auth: String,
@@ -390,7 +442,7 @@ impl Binding {
         if json.len() > 4096 {
             return None;
         }
-        let token_hash = token_hash(token)?;
+        let (_, token_hash, identity_revision) = device_token(token)?;
         let subscription: Subscription = serde_json::from_str(json).ok()?;
         if !valid_endpoint(&subscription.endpoint)
             || subscription.keys.p256dh.len() != 87
@@ -409,6 +461,7 @@ impl Binding {
         }
         Some(Self {
             token_hash,
+            identity_revision,
             endpoint: subscription.endpoint,
             p256dh: subscription.keys.p256dh,
             auth: subscription.keys.auth,
@@ -454,7 +507,7 @@ pub(crate) async fn bind(
     member_id: i64,
     binding: &Binding,
 ) -> Result<BindOutcome, sqlx::Error> {
-    bind_with_preference(tx, member_id, binding, true).await
+    bind_with_preference(tx, member_id, binding, false).await
 }
 
 async fn bind_with_preference(
@@ -467,12 +520,19 @@ async fn bind_with_preference(
         return Ok(BindOutcome::Unavailable);
     }
     let existing = sqlx::query(
-        "SELECT id, user_id, endpoint, p256dh, auth, enabled
+        "SELECT id, user_id, endpoint, p256dh, auth, enabled, identity_revision
          FROM push_devices WHERE token_hash = ?",
     )
     .bind(binding.token_hash.as_slice())
     .fetch_optional(&mut **tx)
     .await?;
+    if existing
+        .as_ref()
+        .map_or(0, |row| row.get::<i64, _>("identity_revision"))
+        != binding.identity_revision
+    {
+        return Ok(BindOutcome::Unavailable);
+    }
     let existing_id = existing.as_ref().map(|row| row.get::<i64, _>("id"));
     if existing
         .as_ref()
@@ -902,6 +962,18 @@ mod tests {
             .unwrap();
         assert_eq!(generation, 1);
         let response = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/push/subscribe?automatic=true",
+                &cookie,
+                origin,
+                &body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let response = app
             .oneshot(request("POST", "/push/subscribe", &cookie, origin, &body))
             .await
             .unwrap();
@@ -986,6 +1058,59 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(jobs, vec!["skipped", "pending"]);
+    }
+
+    #[tokio::test]
+    async fn logout_fences_old_enrollment_even_before_first_registration() {
+        let pool = fixture().await;
+        let app = router(pool.clone());
+        let old_cookie = format!("user_id=2; push_device={}", token(1));
+        let origin = "https://hoopline.example";
+        let body = subscription("https://fcm.googleapis.com/first");
+        let logout = app
+            .clone()
+            .oneshot(request("POST", "/users/logout", &old_cookie, "", ""))
+            .await
+            .unwrap();
+        let new_device = format!("push_device={}.1", token(1));
+        assert!(
+            logout
+                .headers()
+                .get_all(header::SET_COOKIE)
+                .iter()
+                .any(|cookie| cookie.to_str().unwrap().starts_with(&new_device))
+        );
+        let stale = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/push/subscribe?automatic=true",
+                &old_cookie,
+                origin,
+                &body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(stale.status(), StatusCode::BAD_REQUEST);
+        let old_binding = Binding::parse(&token(1), &body).unwrap();
+        assert_eq!(
+            signup_with_push(&pool, 1, 2, Some(&old_binding))
+                .await
+                .unwrap(),
+            (SignupOutcome::AddedWaitlist, Some(BindOutcome::Unavailable))
+        );
+        let new_cookie = format!("user_id=3; {new_device}");
+        let mut enrollment = request("POST", "/push/subscribe", &new_cookie, origin, &body);
+        enrollment
+            .headers_mut()
+            .insert("x-hoopline-user", "3".parse().unwrap());
+        let fresh = app.oneshot(enrollment).await.unwrap();
+        assert_eq!(fresh.status(), StatusCode::OK);
+        let owner: i64 = sqlx::query_scalar("SELECT user_id FROM push_devices")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(owner, 3);
     }
 
     #[test]
@@ -1130,7 +1255,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn waitlist_signup_reenables_device_and_respects_device_limit() {
+    async fn waitlist_signup_keeps_alerts_off_and_respects_device_limit() {
         let pool = fixture().await;
         let first = binding(1, "https://fcm.googleapis.com/first");
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
@@ -1143,8 +1268,13 @@ mod tests {
         let result = signup_with_push(&pool, 1, 2, Some(&first)).await.unwrap();
         assert_eq!(
             result,
-            (SignupOutcome::AddedWaitlist, Some(BindOutcome::Registered))
+            (SignupOutcome::AddedWaitlist, Some(BindOutcome::Unavailable))
         );
+        let enabled: i64 = sqlx::query_scalar("SELECT enabled FROM push_devices")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(enabled, 0);
 
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
         for n in 2..=6 {

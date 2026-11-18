@@ -24,9 +24,6 @@ a { color: var(--accent); }
 .app-shell { max-width: 70rem; margin: auto; padding: 1rem; }
 .card { background: white; border: 1px solid #d9e2dd; border-radius: 1rem; padding: 1rem; }
 .welcome-shell { max-width: 28rem; margin: 8svh auto 2rem; }
-.install-guidance, .alert-setup { margin-bottom: 1rem; }
-.install-guidance h2, .alert-setup h2 { font-size: 1.1rem; }
-.install-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .welcome-card { padding: 1.5rem; }
 .welcome-intro { color: var(--muted); margin: .5rem 0 1rem; }
 .welcome-card .identity-form { gap: .75rem; }
@@ -73,7 +70,14 @@ input[type="checkbox"] { width: auto; min-height: auto; }
 .slot-card { min-width: 0; }
 .slot-heading { display: flex; flex-direction: column; align-items: start; gap: .7rem; }
 .venue { color: var(--muted); margin-top: .2rem; }
+.booking-state { display: flex; flex-wrap: wrap; align-items: center; }
 .booking-status { font-size: .8rem; font-weight: 700; background: #eef2ef; border-radius: .4rem; padding: .25rem .55rem; }
+.waitlist-alerts { color: var(--muted); }
+.waitlist-alerts[open] { flex-basis: 100%; }
+.waitlist-alerts summary { display: grid; place-items: center; width: 44px; padding: 0; list-style: none; }
+.waitlist-alerts summary::-webkit-details-marker { display: none; }
+.waitlist-alerts svg { width: 1rem; height: 1rem; }
+[data-alert-hint] { margin-top: .25rem; }
 .is-booked { background: #dceee4; color: #104e36; }
 .availability { display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; padding: .8rem 0; font-size: .9rem; color: var(--muted); }
 .availability strong { color: #182526; }
@@ -111,6 +115,9 @@ footer { color: var(--muted); text-align: center; font-size: .8rem; padding: 2re
     .app-shell { padding: 1.5rem; }
     .card { padding: 1.25rem; }
     .slot-heading { flex-direction: row; justify-content: space-between; }
+    .booking-state { justify-content: end; }
+    .waitlist-alerts summary { margin-left: auto; }
+    .waitlist-alert-help { text-align: end; }
     .roster-columns { grid-template-columns: 1fr 1fr; }
     .slot-actions form, .slot-actions > a { width: 12rem; }
 }

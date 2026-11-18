@@ -8,9 +8,10 @@
     let leaving = false;
     let pageGeneration = 0;
     const openRosters = new Set();
+    const waitlistEnrollments = new WeakMap();
 
     function disableBookingControls() {
-        document.querySelectorAll('#slots-content button, #user-selector form button, #push-controls button, #enable-alerts, #refresh-slots, .admin-editor button').forEach(button => {
+        document.querySelectorAll('#slots-content button:not([data-enable-alerts]), #user-selector form button, #refresh-slots, .admin-editor button').forEach(button => {
             // Only restore controls disabled by this request, not disabled slot states.
             if (!button.disabled) {
                 button.dataset.requestDisabled = "";
@@ -48,23 +49,6 @@
         htmx.trigger(body, "refresh-slots");
     }
 
-    window.HooplineRequestLock = {
-        acquire() {
-            if (pending) return false;
-            pending = true;
-            disableBookingControls();
-            return true;
-        },
-        release() {
-            finishRequest();
-            if (refreshQueued) {
-                refreshQueued = false;
-                if (!leaving) requestAnimationFrame(refresh);
-            }
-        },
-        refresh
-    };
-
     if (!window.htmx) {
         showError(null, "Booking controls could not load. Check your connection and reload this page.");
         document.querySelectorAll("form:not([action]) button").forEach(button => { button.disabled = true; });
@@ -80,24 +64,15 @@
         const form = event.detail.elt;
         const waitlist = form.matches?.("form[data-join-waitlist]");
         if (!form.matches?.("form[data-signup]")) return;
-        if (!window.HooplinePush?.shouldPrepare(waitlist)) {
+        const push = window.HooplinePush;
+        if (!push?.shouldPrepare()) {
             if (waitlist) {
-                const input = document.createElement("input");
-                input.type = "hidden";
-                input.name = "push_failed";
-                input.dataset.pushPreparation = "";
-                input.value = "1";
-                form.append(input);
+                const onWaitlistSaved = push?.promptOnJoin();
+                if (onWaitlistSaved) waitlistEnrollments.set(form, onWaitlistSaved);
             }
             return;
         }
         event.preventDefault();
-        let permission;
-        try {
-            permission = waitlist ? window.HooplinePush.requestPermission() : Promise.resolve("granted");
-        } catch (_) {
-            permission = Promise.reject(new Error("Permission unavailable"));
-        }
         pending = true;
         const generation = pageGeneration;
         form.querySelectorAll("[data-push-preparation]").forEach(input => input.remove());
@@ -105,33 +80,28 @@
         const status = document.getElementById("booking-request-status");
         status.textContent = "Preparing booking. Booking controls are temporarily unavailable.";
         status.hidden = false;
-        let timedOut = false;
-        const timeout = new Promise((_, reject) => setTimeout(() => {
-            timedOut = true;
-            reject(new Error("timeout"));
-        }, 10000));
-        Promise.race([Promise.resolve(permission).then(result => {
-            if (result !== "granted" || timedOut) throw new Error("Permission not granted");
-            return window.HooplinePush.prepare(waitlist);
-        }), timeout]).then(subscription => {
-            if (leaving || generation !== pageGeneration || !form.isConnected || !subscription) return;
+        let timer;
+        const prepared = push.prepare().catch(() => null);
+        const timeout = new Promise(resolve => { timer = setTimeout(() => resolve(undefined), 1000); });
+        const enrollAfterSignup = push.enrollAfterSignup(prepared);
+        Promise.race([prepared, timeout]).then(subscription => {
+            if (leaving || generation !== pageGeneration || !form.isConnected) return;
+            if (subscription === undefined) waitlistEnrollments.set(form, enrollAfterSignup);
+            if (!subscription) return;
             const input = document.createElement("input");
             input.type = "hidden";
             input.name = "push_subscription";
             input.dataset.pushPreparation = "";
             input.value = subscription;
             form.append(input);
-        }).catch(() => {
-            if (leaving || generation !== pageGeneration || !form.isConnected) return;
-            const input = document.createElement("input");
-            input.type = "hidden";
-            input.name = "push_failed";
-            input.dataset.pushPreparation = "";
-            input.value = "1";
-            form.append(input);
         }).finally(() => {
+            clearTimeout(timer);
             if (leaving || generation !== pageGeneration || !form.isConnected) {
-                window.HooplineRequestLock.release();
+                finishRequest();
+                if (refreshQueued) {
+                    refreshQueued = false;
+                    if (!leaving) requestAnimationFrame(refresh);
+                }
                 return;
             }
             event.detail.issueRequest();
@@ -151,6 +121,11 @@
             return;
         }
         pending = true;
+        const onWaitlistSaved = waitlistEnrollments.get(event.detail.elt);
+        if (onWaitlistSaved) {
+            waitlistEnrollments.delete(event.detail.elt);
+            waitlistEnrollments.set(event.detail.xhr, onWaitlistSaved);
+        }
         disableBookingControls();
         const status = document.getElementById("booking-request-status");
         status.textContent = document.getElementById("name-step") ? "Opening your games."
@@ -202,6 +177,11 @@
         finishRequest();
         // outerHTML swaps replace the original target node.
         const target = document.getElementById(event.detail.target.id) || event.detail.target;
+        const onWaitlistSaved = waitlistEnrollments.get(event.detail.xhr);
+        if (onWaitlistSaved) {
+            waitlistEnrollments.delete(event.detail.xhr);
+            if (!leaving && target.querySelector("[data-waitlist-alerts]")) onWaitlistSaved(target.id);
+        }
         const feedback = target.querySelector?.("[data-feedback]");
         if (feedback) {
             announce(feedback.textContent);
