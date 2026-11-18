@@ -422,7 +422,9 @@ async fn index(
     };
     let current_user_id = Some(current_user.id);
     let current_user_is_admin = current_user.is_admin;
-    themes::process_started_games(&pool, clock::now()).await?;
+    if let Err(error) = themes::process_started_games(&pool, clock::now()).await {
+        eprintln!("theme progress failed; showing saved awards: {error}");
+    }
     let template = SlotsTemplate {
         user_selector_html: render_user_selector(&pool, Some(&current_user), false, lang.clone())
             .await?,

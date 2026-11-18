@@ -129,8 +129,8 @@ async fn process_batch(
 ) -> Result<bool, sqlx::Error> {
     const BATCH_SIZE: u16 = 50;
     let now_text = now.to_rfc3339_opts(SecondsFormat::Micros, true);
-    let slots: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT id, datetime FROM slots
+    let slots: Vec<(i64, String, i64)> = sqlx::query_as(
+        "SELECT id, datetime, unixepoch(datetime) FROM slots
          WHERE theme_progress_processed = 0 AND julianday(datetime) <= julianday(?)
          ORDER BY julianday(datetime), id LIMIT ?",
     )
@@ -140,9 +140,11 @@ async fn process_batch(
     .await?;
     let more = slots.len() == usize::from(BATCH_SIZE);
     let occurred_date = now.with_timezone(&Berlin).date_naive().to_string();
-    for (slot_id, starts_at) in slots {
-        let slot_date = DateTime::parse_from_rfc3339(&starts_at)
-            .map_err(|error| sqlx::Error::Decode(Box::new(error)))?
+    for (slot_id, starts_at, start_seconds) in slots {
+        // Use SQLite's interpretation for legacy date strings, just as the
+        // queue and booking cutoff do. SQLite's date range fits in Chrono.
+        let slot_date = DateTime::from_timestamp_secs(start_seconds)
+            .ok_or_else(|| sqlx::Error::Protocol("game date is out of range".into()))?
             .with_timezone(&Berlin)
             .date_naive()
             .to_string();

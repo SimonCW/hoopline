@@ -45,7 +45,7 @@ async fn only_confirmed_players_without_a_berlin_game_day_cancellation_get_credi
 async fn backfill_ignores_known_late_bookings_and_late_promotions() {
     let pool = data(
         "INSERT INTO users (id, name) VALUES (1, 'Alex'), (2, 'Ben'), (3, 'Chris');
-         INSERT INTO slots (id, datetime, venue) VALUES (1, '2099-07-01T22:30:00Z', 'Court');
+         INSERT INTO slots (id, datetime, venue) VALUES (1, '2099-07-01 22:30:00', 'Court');
          INSERT INTO bookings (id, slot_id, user_id, position, created_at) VALUES
              (1, 1, 1, 1, '2099-07-01T22:30:00Z'),
              (2, 1, 2, 2, '2099-07-01T22:00:00Z'),
