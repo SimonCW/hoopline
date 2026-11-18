@@ -28,6 +28,100 @@ async fn test_pool() -> sqlx::SqlitePool {
 }
 
 #[tokio::test]
+async fn browser_language_respects_quality_and_cookie() {
+    let app = app_with_pool(test_pool().await);
+    for (preferences, cookie, language, label) in [
+        ("de-CH, en;q=0.8", "", "de", "Dein Name"),
+        ("de;q=0, en;q=0.8", "", "en", "Your name"),
+        ("de;q=0.4, en-GB;q=0.8", "", "en", "Your name"),
+        ("es, de;q=0.6", "hoopline_lang=unknown", "de", "Dein Name"),
+        ("fr-CA", "", "en", "Your name"),
+        ("de-DE", "hoopline_lang=en", "en", "Your name"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header(header::ACCEPT_LANGUAGE, preferences)
+                    .header(header::COOKIE, cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_LANGUAGE], language);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        let body = response_body_string(response).await;
+        assert!(body.contains(&format!(r#"<html lang="{language}">"#)));
+        assert!(body.contains(label));
+    }
+}
+
+#[tokio::test]
+async fn language_form_redirects_only_to_safe_app_pages() {
+    let app = app_with_pool(test_pool().await);
+    for (target, expected) in [
+        ("/slots?mode=admin", "/slots?mode=admin"),
+        ("/admin/slots/1/edit", "/admin/slots/1/edit"),
+        ("https://example.com/slots", "/"),
+        ("//example.com/slots", "/"),
+        ("/slots\\@example.com", "/"),
+        ("/%2Fexample.com/slots", "/"),
+        ("/slots/fragment", "/"),
+    ] {
+        let form = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("locale", "de")
+            .append_pair("return_to", target)
+            .finish();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/language")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response.headers()[header::LOCATION], expected);
+        let cookie = response.headers()[header::SET_COOKIE].to_str().unwrap();
+        assert!(cookie.starts_with("hoopline_lang=de;"));
+        assert!(cookie.contains("HttpOnly; SameSite=Lax"));
+        assert_eq!(
+            response
+                .headers()
+                .get_all(header::SET_COOKIE)
+                .iter()
+                .count(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
+async fn german_booking_errors_keep_status_and_return_localized_html() {
+    let response = app_with_pool(test_pool().await)
+        .oneshot(
+            Request::post("/slots/9000/signup")
+                .header(header::COOKIE, "user_id=1; hoopline_lang=de")
+                .header("x-hoopline-user", "1")
+                .header("hx-request", "true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.headers()[header::CONTENT_LANGUAGE], "de");
+    let body = response_body_string(response).await;
+    assert!(body.contains("Anfrage fehlgeschlagen"));
+    assert!(body.contains("Dieses Spiel gibt es nicht."));
+}
+
+#[tokio::test]
 async fn robots_discourages_indexing() {
     let response = app_with_pool(test_pool().await)
         .oneshot(

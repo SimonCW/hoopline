@@ -3,6 +3,8 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use sqlx::{Row, SqlitePool};
 
+use crate::i18n::Locale;
+
 const LEASE_SECONDS: i64 = 30;
 const MAX_ATTEMPTS: i64 = 6;
 const RETRY_SECONDS: [i64; 5] = [10, 30, 120, 300, 900];
@@ -13,6 +15,7 @@ pub(super) struct Claim {
 }
 
 pub(super) struct Delivery {
+    pub(super) locale: Locale,
     pub(super) endpoint: String,
     pub(super) p256dh: String,
     pub(super) auth: String,
@@ -113,7 +116,7 @@ pub(super) async fn prepare(
     now: i64,
 ) -> Result<Option<Delivery>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT d.endpoint, d.p256dh, d.auth, j.expires_at, j.booking_id,
+        "SELECT d.endpoint, d.p256dh, d.auth, d.locale, j.expires_at, j.booking_id,
                 b.slot_id, s.datetime, s.venue
          FROM push_jobs j
          JOIN push_devices d ON d.id = j.device_id
@@ -141,6 +144,7 @@ pub(super) async fn prepare(
         return Ok(None);
     }
     Ok(Some(Delivery {
+        locale: Locale::from_code(row.try_get("locale")?).unwrap_or_default(),
         endpoint,
         p256dh: row.try_get("p256dh")?,
         auth: row.try_get("auth")?,

@@ -9,7 +9,7 @@ use std::{
 
 use axum::{
     extract::{ConnectInfo, Request, State},
-    http::{Method, StatusCode},
+    http::Method,
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -111,11 +111,7 @@ pub(crate) async fn limit_writes(
             .and_then(|value| value.trim().parse::<IpAddr>().ok())
             .or(peer_ip);
         if !limits.allow(ip, category, Instant::now()) {
-            return (
-                StatusCode::TOO_MANY_REQUESTS,
-                "Too many requests. Please wait and try again.",
-            )
-                .into_response();
+            return crate::error::AppError::RateLimited.into_response();
         }
     }
     next.run(request).await

@@ -5,6 +5,7 @@
     const alertSetup = document.getElementById("alert-setup");
     const enableAlerts = document.getElementById("enable-alerts");
     const alertMessage = document.getElementById("alert-setup-status");
+    const messages = alertMessage?.dataset;
     const worker = "serviceWorker" in navigator
         ? navigator.serviceWorker.register("/sw.js")
             .then(() => navigator.serviceWorker.ready).catch(() => null) : Promise.resolve(null);
@@ -26,8 +27,7 @@
                 if (!alertSetup.hidden) {
                     const denied = Notification.permission === "denied";
                     enableAlerts.hidden = denied;
-                    alertMessage.textContent = denied
-                        ? "Alerts are blocked. Allow notifications in your browser or device settings." : "";
+                    alertMessage.textContent = denied ? messages.blocked : "";
                 }
             }
         } catch (_) {
@@ -91,7 +91,7 @@
         const controller = new AbortController();
         let expired = false;
         let timer;
-        alertMessage.textContent = "Setting up alerts…";
+        alertMessage.textContent = messages.settingUp;
         try {
             const setup = async () => {
                 if (await window.HooplinePush.requestPermission() !== "granted" || expired) {
@@ -119,11 +119,11 @@
             });
             status = await Promise.race([setup(), timeout]);
             enableAlerts.hidden = true;
-            alertMessage.textContent = "Promotion alerts are on for this device.";
+            alertMessage.textContent = messages.on;
         } catch (_) {
             alertMessage.textContent = Notification.permission === "denied"
-                ? "Alerts are blocked. Allow notifications in your browser or device settings."
-                : "Alerts could not be enabled. Try again.";
+                ? messages.blocked
+                : messages.failed;
             if (Notification.permission === "denied") enableAlerts.hidden = true;
         } finally {
             clearTimeout(timer);

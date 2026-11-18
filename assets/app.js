@@ -1,6 +1,7 @@
 /* Keep bookings server-confirmed. Never show success before the response arrives. */
 (() => {
     const body = document.body;
+    const messages = body.dataset;
     const announcement = document.getElementById("announcements");
     let pending = false;
     let refreshQueued = false;
@@ -10,7 +11,7 @@
     const openRosters = new Set();
 
     function disableBookingControls() {
-        document.querySelectorAll('#slots-content button, #user-selector form button, #push-controls button, #enable-alerts, #refresh-slots, .admin-editor button').forEach(button => {
+        document.querySelectorAll('#slots-content button, #user-selector form button, #push-controls button, #enable-alerts, #refresh-slots, .admin-editor button, .language-picker button').forEach(button => {
             // Only restore controls disabled by this request, not disabled slot states.
             if (!button.disabled) {
                 button.dataset.requestDisabled = "";
@@ -66,7 +67,7 @@
     };
 
     if (!window.htmx) {
-        showError(null, "Booking controls could not load. Check your connection and reload this page.");
+        showError(null, messages.controlsFailed);
         document.querySelectorAll("form:not([action]) button").forEach(button => { button.disabled = true; });
         return;
     }
@@ -103,7 +104,7 @@
         form.querySelectorAll("[data-push-preparation]").forEach(input => input.remove());
         disableBookingControls();
         const status = document.getElementById("booking-request-status");
-        status.textContent = "Preparing booking. Booking controls are temporarily unavailable.";
+        status.textContent = messages.preparingBooking;
         status.hidden = false;
         let timedOut = false;
         const timeout = new Promise((_, reject) => setTimeout(() => {
@@ -146,16 +147,16 @@
     });
     body.addEventListener("htmx:beforeRequest", (event) => {
         if (event.detail.elt.closest('.admin-editor')?.querySelector('[name="bookings"]:checked')?.value === 'clear' &&
-            !window.confirm('Clear all player and waitlist bookings? No notifications will be sent.')) {
+            !window.confirm(event.detail.elt.dataset.confirmClear)) {
             event.preventDefault();
             return;
         }
         pending = true;
         disableBookingControls();
         const status = document.getElementById("booking-request-status");
-        status.textContent = document.getElementById("name-step") ? "Opening your games."
-            : event.detail.requestConfig.verb === "get" ? "Updating slots. Booking controls are temporarily unavailable."
-                : "Saving changes. Booking controls are temporarily unavailable.";
+        status.textContent = document.getElementById("name-step") ? messages.openingGames
+            : event.detail.requestConfig.verb === "get" ? messages.refreshingGames
+                : messages.savingChanges;
         status.hidden = false;
         const scope = event.detail.elt.closest(".slot-card, #name-step, #user-selector, .admin-editor") || event.detail.elt;
         scope.setAttribute("aria-busy", "true");
@@ -185,16 +186,20 @@
             if (roster) roster.open = true;
         });
     });
-    body.addEventListener("htmx:responseError", (event) => {
-        if (event.detail.xhr.status === 429) {
-            showError(event.detail.elt, "Too many requests. Please wait and try again.");
-            return;
+    body.addEventListener("htmx:beforeOnLoad", event => {
+        const locale = event.detail.xhr.getResponseHeader("Content-Language");
+        if ((locale === "en" || locale === "de") && locale !== document.documentElement.lang) {
+            // Another tab changed the shared cookie. Do not mix languages in this page.
+            event.preventDefault();
+            window.location.reload();
         }
+    });
+    body.addEventListener("htmx:responseError", (event) => {
         const doc = new DOMParser().parseFromString(event.detail.xhr.responseText, "text/html");
-        showError(event.detail.elt, doc.querySelector("main p")?.textContent?.trim() || "Request failed. Refresh and check your booking before trying again.");
+        showError(event.detail.elt, doc.querySelector("main p")?.textContent?.trim() || messages.requestFallback);
     });
     ["htmx:sendError", "htmx:timeout"].forEach(type => body.addEventListener(type, event => {
-        showError(event.detail.elt, "Connection failed. We could not confirm your booking. Refresh and check your status before trying again.");
+        showError(event.detail.elt, messages.connectionFailed);
     }));
     body.addEventListener("htmx:afterSettle", (event) => {
         // Out-of-band identity updates also emit this event for the same request.
@@ -211,7 +216,7 @@
         if (target.id === "slots-content" && focusAfterSwap) {
             document.getElementById("refresh-slots")?.focus({ preventScroll: true });
             focusAfterSwap = false;
-            announce("Upcoming slots refreshed.");
+            announce(messages.refreshed);
         }
         if (refreshQueued) {
             refreshQueued = false;

@@ -67,7 +67,9 @@
         list.hidden = matches.length === 0;
         input.setAttribute("aria-expanded", String(matches.length > 0));
         highlight(-1);
-        status.textContent = matches.length ? `${matches.length} matching names. Select yours, then continue.` : "No matching names. Add a new member below.";
+        status.textContent = matches.length === 0 ? status.dataset.none
+            : matches.length === 1 ? status.dataset.one
+                : status.dataset.many.replace("{count}", String(matches.length));
     }
 
     function select(option) {
@@ -76,7 +78,7 @@
         selectedUser.disabled = false;
         input.focus({ preventScroll: true });
         close();
-        status.textContent = `${input.value} selected. Choose Continue.`;
+        status.textContent = status.dataset.selected.replace("{name}", () => input.value);
     }
 
     input.addEventListener("input", () => {

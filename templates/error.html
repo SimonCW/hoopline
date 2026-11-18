@@ -1,14 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ locale.code() }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Request failed · Hoopline</title>
+    <title>{{ locale.text().request_failed }} · Hoopline</title>
     <link href="/assets/app.css" rel="stylesheet">
 </head>
 <body><main class="app-shell"><div class="card empty-state">
-    <h1>Request failed</h1>
+    <h1>{{ locale.text().request_failed }}</h1>
     <p>{{ message }}</p>
-    <a href="/slots" class="btn btn-primary">Back to slots</a>
+    <a href="/slots" class="btn btn-primary">{{ locale.text().back_to_slots }}</a>
 </div></main></body>
 </html>
