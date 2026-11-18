@@ -1,4 +1,4 @@
-<section id="slots-content" class="slots-content"
+<section id="slots-content" class="slots-content" data-push-state="{{ push_state }}"
     hx-get="/slots/fragment{% if admin_mode %}?mode=admin{% endif %}" hx-trigger="refresh-slots from:body"
     hx-swap="outerHTML" hx-sync="body:queue last" aria-labelledby="slots-heading">
     <h2 id="slots-heading" class="sr-only" tabindex="-1">{{ lang.text.next_games }}</h2>
@@ -24,7 +24,6 @@
     <div class="card empty-state"><h2>{{ lang.text.no_games }}</h2><p>{{ lang.text.no_games_help }}</p></div>
     {% endif %}
     {% let feedback = "" %}
-    {% let show_feedback = false %}
     {% for week in weeks %}
     <section class="slot-week" aria-labelledby="week-{{ week.key }}">
         <h2 id="week-{{ week.key }}" class="week-heading">{{ lang.locale.week_label(week.monday.as_ref()) }}</h2>

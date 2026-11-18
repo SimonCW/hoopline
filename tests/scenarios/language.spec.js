@@ -29,7 +29,9 @@ test('a player can book, refresh, and cancel in German without changing identity
   await expect(card.getByTestId('booking-status')).toHaveText('Nicht angemeldet');
   await expect(page.locator('#announcements')).toHaveText(/Anmeldung zurückgezogen/);
 
+  await page.goto('/slots#slot-2');
   await page.getByRole('button', { name: 'English' }).click();
+  await expect(page).toHaveURL(/\/slots#slot-2$/);
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.locator('.identity-name')).toHaveText('Jamali');
   await expect(card.getByTestId('booking-status')).toHaveText('Not booked');

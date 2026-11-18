@@ -300,11 +300,22 @@ impl<S: Send + Sync> FromRequestParts<S> for Language {
 }
 
 fn page_path(value: &str) -> Option<&str> {
-    let uri: Uri = value.parse().ok()?;
+    let (target, fragment) = value
+        .split_once('#')
+        .map_or((value, None), |(target, fragment)| (target, Some(fragment)));
+    let uri: Uri = target.parse().ok()?;
     if uri.scheme().is_some() || uri.authority().is_some() {
         return None;
     }
     let path = uri.path();
+    if let Some(fragment) = fragment
+        && !(path == "/slots"
+            && fragment
+                .strip_prefix("slot-")
+                .is_some_and(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit())))
+    {
+        return None;
+    }
     let is_game_editor = path
         .strip_prefix("/admin/slots/")
         .and_then(|id| id.strip_suffix("/edit"))
@@ -369,10 +380,6 @@ copybook! {
     credits_illustration: "AI-generated illustration, faded and tinted. No Creative Commons license has been established. Team branding and player likenesses may have separate rights.", "KI-generierte Illustration, aufgehellt und eingefärbt. Es ist keine Creative-Commons-Lizenz bekannt. Für Teamlogos und Spielerabbildungen können eigene Rechte gelten.";
     credits_alba: "AI-generated illustration, faded and tinted; it is not a documentary photograph. No Creative Commons license has been established. Team branding and player likenesses may have separate rights.", "KI-generierte Illustration, aufgehellt und eingefärbt. Sie ist kein dokumentarisches Foto. Es ist keine Creative-Commons-Lizenz bekannt. Für Teamlogos und Spielerabbildungen können eigene Rechte gelten.";
     choose_name: "Choose your name", "Wähle deinen Namen";
-    install_for_alerts: "Install Hoopline for waitlist alerts", "Hoopline für Wartelisten-Benachrichtigungen installieren";
-    install_alerts_help: "Get alerts when you move off the waitlist. Installation is optional, and alerts may not arrive.", "Lass dich benachrichtigen, wenn du von der Warteliste nachrückst. Die Installation ist freiwillig. Benachrichtigungen kommen möglicherweise nicht an.";
-    install_other_alerts: "On other devices, use your browser's install or Add to Home Screen option. Select your name again in the installed app, then enable alerts.", "Nutze auf anderen Geräten die Installationsfunktion deines Browsers oder füge Hoopline zum Startbildschirm hinzu. Wähle in der installierten App erneut deinen Namen und aktiviere dann die Benachrichtigungen.";
-    continue_browser: "Continue in browser", "Im Browser fortfahren";
     next_up: "You're up next", "Du bist dran";
     welcome_intro: "Choose your name to see the next games.", "Wähle deinen Namen, um die nächsten Spiele zu sehen.";
     your_name: "Your name", "Dein Name";
@@ -395,9 +402,9 @@ copybook! {
     generate_games: "Generate open games", "Freigegebene Spiele erstellen";
     no_games: "No upcoming slots", "Keine anstehenden Spiele";
     no_games_help: "Please check again soon. New games open on Sunday evening.", "Schau bald wieder vorbei. Neue Spiele werden am Sonntagabend freigegeben.";
-    alert_setup: "Waitlist promotion alerts", "Benachrichtigungen zum Nachrücken";
-    alert_setup_help: "Enable alerts on this device to hear when you move off the waitlist. Alerts may not arrive; check your booking here.", "Aktiviere Benachrichtigungen auf diesem Gerät, um vom Nachrücken zu erfahren. Sie kommen möglicherweise nicht an. Prüfe deine Anmeldung hier.";
-    enable_alerts: "Enable promotion alerts", "Benachrichtigungen aktivieren";
+    enable_alerts: "Notify me if I move up", "Benachrichtige mich, wenn ich nachrücke";
+    alert_off: "Promotion alerts are off on this device", "Benachrichtigungen zum Nachrücken sind auf diesem Gerät aus";
+    alert_hint: "Allow notifications to get an alert if you move up.", "Erlaube Benachrichtigungen, um vom Nachrücken zu erfahren.";
     changed_game: "Changed game", "Geändertes Spiel";
     availability: "Availability", "Verfügbarkeit";
     player_list: "Players", "Spielerliste";
@@ -410,7 +417,6 @@ copybook! {
     signup: "Sign Up", "Anmelden";
     join_waitlist: "Join Waitlist", "Auf die Warteliste";
     lists_full: "Player list and waitlist are full.", "Spielerliste und Warteliste sind voll.";
-    waitlist_check: "Check your booking here. Promotion alerts may not arrive.", "Prüfe deine Anmeldung hier. Benachrichtigungen zum Nachrücken kommen möglicherweise nicht an.";
     add_a_member: "Add a member", "Mitglied hinzufügen";
     member: "Member", "Mitglied";
     select_member: "Select a member", "Mitglied auswählen";
@@ -495,7 +501,12 @@ copybook! {
     search_one: "1 matching name. Select yours, then continue.", "1 passender Name. Wähle deinen Namen und fahre fort.";
     search_many: "{count} matching names. Select yours, then continue.", "{count} passende Namen. Wähle deinen Namen und fahre fort.";
     search_selected: "{name} selected. Choose Continue.", "{name} ausgewählt. Wähle „Weiter“.";
-    alerts_blocked: "Alerts are blocked. Allow notifications in your browser or device settings.", "Benachrichtigungen sind blockiert. Erlaube sie in den Einstellungen deines Browsers oder Geräts.";
+    alerts_stale: "Log out and select your name again to set up alerts on this device.", "Melde dich ab und wähle deinen Namen erneut, um Benachrichtigungen auf diesem Gerät einzurichten.";
+    alerts_unavailable: "Alerts are unavailable. Check your booking here.", "Benachrichtigungen sind nicht verfügbar. Prüfe deine Anmeldung hier.";
+    alerts_install: "On iPhone or iPad, choose Share → Add to Home Screen. Select Open as Web App if offered, then open Hoopline there and select your name.", "Wähle auf dem iPhone oder iPad „Teilen“ → „Zum Home-Bildschirm“. Aktiviere falls verfügbar „Als Web-App öffnen“. Öffne Hoopline dann vom Home-Bildschirm und wähle deinen Namen.";
+    alerts_unsupported: "This browser cannot receive alerts. Check your booking here.", "Dieser Browser kann keine Benachrichtigungen empfangen. Prüfe deine Anmeldung hier.";
+    alerts_blocked: "Allow notifications in your browser or device settings.", "Erlaube Benachrichtigungen in den Einstellungen deines Browsers oder Geräts.";
+    alerts_help: "Get an alert if you move up. Check your booking here if no alert arrives.", "Lass dich benachrichtigen, wenn du nachrückst. Prüfe deine Anmeldung hier, wenn keine Benachrichtigung ankommt.";
     setting_up_alerts: "Setting up alerts…", "Benachrichtigungen werden eingerichtet …";
     alerts_setup_failed: "Alerts could not be enabled. Try again.", "Benachrichtigungen konnten nicht aktiviert werden. Versuche es erneut.";
 }

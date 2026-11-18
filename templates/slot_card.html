@@ -7,7 +7,24 @@
             <p class="venue">{% if !slot.map_url.is_empty() %}<a href="{{ slot.map_url }}" target="_blank" rel="noopener noreferrer" aria-label="{{ lang.locale.map_label(slot.venue) }}">{{ slot.venue }}</a>{% else %}{{ slot.venue }}{% endif %}</p>
             {% if slot.is_override %}<p class="muted">{{ lang.text.changed_game }}</p>{% endif %}
         </div>
-        <p class="booking-status {% if slot.user_is_signed_up(current_user_id) %}is-booked{% endif %}" data-testid="booking-status">{{ lang.locale.booking_status(slot, current_user_id.as_ref()) }}</p>
+        <div class="booking-state">
+            <p class="booking-status {% if slot.user_is_signed_up(current_user_id) %}is-booked{% endif %}" data-testid="booking-status">{{ lang.locale.booking_status(slot, current_user_id.as_ref()) }}</p>
+            {% if !admin_mode && !slot.has_started() && slot.user_is_waitlisted(current_user_id) %}
+            <details class="waitlist-alerts" data-waitlist-alerts hidden>
+                <summary title="{{ lang.text.alert_off }}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M10 20a2 2 0 0 0 4 0M3 3l18 18M6 6a6 6 0 0 0 0 3c0 6-3 7-3 8h14M9 4a6 6 0 0 1 9 5c0 2 .3 3.5.8 4.5"/>
+                    </svg>
+                    <span class="sr-only">{{ lang.text.alert_off }}</span>
+                </summary>
+                <div class="waitlist-alert-help">
+                    <p class="muted" data-alert-help></p>
+                    <button type="button" class="btn btn-small" data-enable-alerts hidden>{{ lang.text.enable_alerts }}</button>
+                    <p class="muted" data-alert-feedback role="status"></p>
+                </div>
+            </details>
+            {% endif %}
+        </div>
     </div>
     <div class="availability" aria-label="{{ lang.text.availability }}">
         <span>{{ lang.locale.player_capacity(slot) }}</span>
@@ -27,16 +44,16 @@
         {% elif slot.can_accept_signup() %}
         <form data-signup {% if slot.players.len() >= slot.max_players %}data-join-waitlist{% endif %} hx-post="/slots/{{ slot.id }}/signup{% if admin_mode %}?mode=admin{% endif %}">
             <button id="slot-action-{{ slot.id }}" type="submit" class="btn btn-primary">{% if slot.players.len() < slot.max_players %}{{ lang.text.signup }}{% else %}{{ lang.text.join_waitlist }}{% endif %}</button>
+            {% if slot.players.len() >= slot.max_players %}
+            <p class="muted" data-alert-hint hidden>{{ lang.text.alert_hint }}</p>
+            {% endif %}
         </form>
         {% else %}
         <p>{{ lang.text.lists_full }}</p>
         {% endif %}
     </div>
-    {% if !admin_mode && slot.user_is_waitlisted(current_user_id) %}
-    <p class="muted">{{ lang.text.waitlist_check }}</p>
-    {% endif %}
     {% if !feedback.is_empty() %}
-    <p class="{% if show_feedback %}muted{% else %}sr-only{% endif %}" data-feedback>{{ feedback }}</p>
+    <p class="sr-only" data-feedback>{{ feedback }}</p>
     {% endif %}
     <p class="request-error" role="alert" tabindex="-1" hidden></p>
     {% if admin_mode %}

@@ -12,17 +12,20 @@ const exec = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 export const scenarioNow = '2030-01-07T12:00:00Z';
 export const scenarioSlotId = 1001;
+export const scenarioPushOrigin = 'https://hoopline.example';
+export const scenarioPushPublicKey = 'BMjQIp55pdbU8pfCBKyXcZjlmER_mXt5LqNrN1hrXbdBS5EnhIbMu3Au-RV53iIpztzNXkGI56BFB1udQ8Bq_H4';
 
 export const test = base.extend({
   seedProfile: ['legacy', { option: true }],
   now: [scenarioNow, { option: true }],
   serviceWorkers: ['block', { option: true }],
+  pushEnabled: [false, { option: true }],
   baseURL: async ({ app }, use) => { await use(app.baseURL); },
   _networkIsolation: [async ({ context, app }, use) => {
     await app.blockNetwork(context);
     await use();
   }, { auto: true }],
-  app: async ({ browser, contextOptions, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent, seedProfile, now, serviceWorkers }, use, testInfo) => {
+  app: async ({ browser, contextOptions, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent, seedProfile, now, serviceWorkers, pushEnabled }, use, testInfo) => {
     const directory = await mkdtemp(join(process.env.TMPDIR || tmpdir(), 'hoopline-scenario-'));
     const databasePath = join(directory, 'hoopline.sqlite');
     let port = 0;
@@ -47,6 +50,12 @@ export const test = base.extend({
           COOKIE_SECURE: 'false',
           PREVIEW_SAMPLE: '0',
           HOOPLINE_TEST_NOW: currentNow,
+          PUSH_ENABLED: String(pushEnabled),
+          // Test-only key pair. Browser tests never contact a real push provider.
+          APP_ORIGIN: scenarioPushOrigin,
+          VAPID_PUBLIC_KEY: scenarioPushPublicKey,
+          VAPID_PRIVATE_KEY: 'IQ9Ur0ykXoHS9gzfYX0aBjy9lvdrjx_PFUXmie9YRcY',
+          VAPID_SUBJECT: 'mailto:operator@example.com',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       });

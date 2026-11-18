@@ -144,7 +144,10 @@ pub(super) async fn prepare(
         return Ok(None);
     }
     Ok(Some(Delivery {
-        locale: Locale::from_code(row.try_get("locale")?).unwrap_or_default(),
+        locale: row
+            .try_get::<Option<&str>, _>("locale")?
+            .and_then(Locale::from_code)
+            .unwrap_or_default(),
         endpoint,
         p256dh: row.try_get("p256dh")?,
         auth: row.try_get("auth")?,

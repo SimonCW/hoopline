@@ -2,16 +2,6 @@
 {% block title %}{{ title }} · {{ lang.text.choose_name }}{% endblock %}
 {% block content %}
 <div class="welcome-shell">
-    <section id="install-guidance" class="card install-guidance" aria-labelledby="install-title" hidden>
-        <h2 id="install-title">{{ lang.text.install_for_alerts }}</h2>
-        <p>{{ lang.text.install_alerts_help }}</p>
-        <p>{{ lang.text.install_ios }}</p>
-        <p>{{ lang.text.install_other_alerts }}</p>
-        <div class="install-actions">
-            <button type="button" class="btn btn-primary" data-install-app hidden>{{ lang.text.install }}</button>
-            <button type="button" class="btn btn-secondary" id="dismiss-install">{{ lang.text.continue_browser }}</button>
-        </div>
-    </section>
     {{ user_selector_html|safe }}
 </div>
 {% endblock %}

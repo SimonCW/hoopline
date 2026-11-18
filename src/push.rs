@@ -6,7 +6,7 @@ mod sender;
 use axum::{
     Extension, Json,
     body::Bytes,
-    extract::State,
+    extract::{Query, State},
     http::{HeaderMap, HeaderValue, header},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -124,26 +124,32 @@ fn configuration(
     ))
 }
 
-fn token_hash(token: &str) -> Option<[u8; 32]> {
+fn device_token(value: &str) -> Option<(&str, [u8; 32], i64)> {
+    let (token, revision) = value.split_once('.').unwrap_or((value, "0"));
     if token.len() != 43 {
         return None;
     }
-    let token = URL_SAFE_NO_PAD.decode(token).ok()?;
-    (token.len() == 32).then(|| Sha256::digest(token).into())
+    let decoded = URL_SAFE_NO_PAD.decode(token).ok()?;
+    let revision: i64 = revision.parse().ok()?;
+    (decoded.len() == 32 && revision >= 0)
+        .then(|| (token, Sha256::digest(decoded).into(), revision))
 }
 
 pub(crate) fn device_cookie(headers: &HeaderMap, config: &Config) -> Option<HeaderValue> {
     if config.origin.is_none()
         || cookie_value(headers, "push_device")
-            .and_then(token_hash)
+            .and_then(device_token)
             .is_some()
     {
         return None;
     }
     let mut bytes = [0_u8; 32];
     getrandom::fill(&mut bytes).ok()?;
-    let token = URL_SAFE_NO_PAD.encode(bytes);
-    let secure = if config.secure_cookie { "; Secure" } else { "" };
+    device_cookie_header(&URL_SAFE_NO_PAD.encode(bytes), config.secure_cookie)
+}
+
+fn device_cookie_header(token: &str, secure: bool) -> Option<HeaderValue> {
+    let secure = if secure { "; Secure" } else { "" };
     HeaderValue::from_str(&format!(
         "push_device={token}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax{secure}"
     ))
@@ -152,18 +158,44 @@ pub(crate) fn device_cookie(headers: &HeaderMap, config: &Config) -> Option<Head
 
 fn owned_token(headers: &HeaderMap) -> Result<[u8; 32], AppError> {
     cookie_value(headers, "push_device")
-        .and_then(token_hash)
+        .and_then(device_token)
+        .map(|(_, hash, _)| hash)
         .ok_or(AppError::Forbidden(Problem::DeviceRequired))
 }
 
 pub(crate) async fn detach(
     tx: &mut Transaction<'_, Sqlite>,
     headers: &HeaderMap,
-) -> Result<(), sqlx::Error> {
-    let Some(hash) = cookie_value(headers, "push_device").and_then(token_hash) else {
-        return Ok(());
+    config: &Config,
+) -> Result<Option<HeaderValue>, sqlx::Error> {
+    let Some((token, hash, _)) = cookie_value(headers, "push_device").and_then(device_token) else {
+        return Ok(None);
     };
+    if !device_capacity_available(tx, &hash).await? {
+        return Ok(None);
+    }
     let now = crate::clock::now().timestamp();
+    // Use the stable token on identity changes. A lost response can leave a
+    // stale revision in the browser, but logout must still detach the device.
+    let next: Option<i64> = sqlx::query_scalar(
+        "INSERT INTO push_devices (token_hash, created_at, updated_at, identity_revision)
+         SELECT ?, ?, ?, 1 WHERE ? OR EXISTS (
+             SELECT 1 FROM push_devices WHERE token_hash = ?
+         ) ON CONFLICT(token_hash) DO UPDATE SET
+             user_id = NULL, generation = generation + (user_id IS NOT NULL),
+             updated_at = excluded.updated_at, identity_revision = identity_revision + 1
+         RETURNING identity_revision",
+    )
+    .bind(hash.as_slice())
+    .bind(now)
+    .bind(now)
+    .bind(config.origin.is_some())
+    .bind(hash.as_slice())
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(next) = next else {
+        return Ok(None);
+    };
     sqlx::query(
         "UPDATE push_jobs SET status = 'skipped', completed_at = ?
          WHERE device_id = (SELECT id FROM push_devices WHERE token_hash = ?)
@@ -173,15 +205,10 @@ pub(crate) async fn detach(
     .bind(hash.as_slice())
     .execute(&mut **tx)
     .await?;
-    sqlx::query(
-        "UPDATE push_devices SET user_id = NULL, generation = generation + 1, updated_at = ?
-         WHERE token_hash = ? AND user_id IS NOT NULL",
-    )
-    .bind(now)
-    .bind(hash.as_slice())
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
+    Ok(device_cookie_header(
+        &format!("{token}.{next}"),
+        config.secure_cookie || config.origin.is_none(),
+    ))
 }
 
 pub(crate) async fn update_language(
@@ -189,13 +216,14 @@ pub(crate) async fn update_language(
     headers: &HeaderMap,
     locale: Locale,
 ) -> Result<(), sqlx::Error> {
-    if let Some(hash) = cookie_value(headers, "push_device").and_then(token_hash)
+    if let Some((_, hash, revision)) = cookie_value(headers, "push_device").and_then(device_token)
         && let Some(user_id) = user_id_from_cookie(headers)
     {
-        sqlx::query("UPDATE push_devices SET locale = ? WHERE token_hash = ? AND user_id = ?")
+        sqlx::query("UPDATE push_devices SET locale = ? WHERE token_hash = ? AND user_id = ? AND identity_revision = ?")
             .bind(locale.code())
             .bind(hash.as_slice())
             .bind(user_id)
+            .bind(revision)
             .execute(pool)
             .await?;
     }
@@ -230,30 +258,8 @@ pub(crate) async fn status(
     Extension(config): Extension<Config>,
     headers: HeaderMap,
 ) -> Result<Json<Status>, AppError> {
-    let mut state = "unregistered";
-    if config.origin.is_some()
-        && let Some(hash) = cookie_value(&headers, "push_device").and_then(token_hash)
-        && let Some(row) =
-            sqlx::query("SELECT user_id, enabled, endpoint FROM push_devices WHERE token_hash = ?")
-                .bind(hash.as_slice())
-                .fetch_optional(&pool)
-                .await?
-    {
-        if row.try_get::<i64, _>("enabled")? == 0 {
-            state = "disabled";
-        } else {
-            let user = current_user_from_headers(&pool, &headers).await?;
-            if user.as_ref().map(|user| user.id) == row.try_get::<Option<i64>, _>("user_id")?
-                && user.is_some()
-            {
-                state = if row.try_get::<Option<String>, _>("endpoint")?.is_some() {
-                    "registered"
-                } else {
-                    "expired"
-                };
-            }
-        }
-    }
+    let user = current_user_from_headers(&pool, &headers).await?;
+    let state = device_state(&pool, &config, &headers, user.map(|user| user.id)).await?;
     Ok(Json(Status {
         available: config.origin.is_some(),
         public_key: config.public_key.clone(),
@@ -261,10 +267,51 @@ pub(crate) async fn status(
     }))
 }
 
+pub(crate) async fn device_state(
+    pool: &SqlitePool,
+    config: &Config,
+    headers: &HeaderMap,
+    member: Option<i64>,
+) -> Result<&'static str, sqlx::Error> {
+    if config.origin.is_none() {
+        return Ok("unavailable");
+    }
+    let Some((_, hash, revision)) = cookie_value(headers, "push_device").and_then(device_token)
+    else {
+        return Ok("unregistered");
+    };
+    let row = sqlx::query(
+        "SELECT user_id, enabled, endpoint, identity_revision FROM push_devices WHERE token_hash = ?",
+    )
+    .bind(hash.as_slice())
+    .fetch_optional(pool)
+    .await?;
+    Ok(match row {
+        Some(row) if row.get::<i64, _>("identity_revision") != revision => "stale",
+        Some(row) if row.get::<i64, _>("enabled") == 0 => "disabled",
+        Some(row) if member.is_some() && row.get::<Option<i64>, _>("user_id") == member => {
+            if row.get::<Option<String>, _>("endpoint").is_some() {
+                "registered"
+            } else {
+                "expired"
+            }
+        }
+        None if revision != 0 => "stale",
+        _ => "unregistered",
+    })
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct SubscribeQuery {
+    #[serde(default)]
+    automatic: bool,
+}
+
 pub(crate) async fn subscribe(
     State(pool): State<SqlitePool>,
     lang: Language,
     Extension(config): Extension<Config>,
+    Query(query): Query<SubscribeQuery>,
     user: BookingIdentity,
     headers: HeaderMap,
     body: Bytes,
@@ -274,11 +321,12 @@ pub(crate) async fn subscribe(
         .ok_or(AppError::Forbidden(Problem::DeviceRequired))?;
     let body =
         std::str::from_utf8(&body).map_err(|_| AppError::BadRequest(Problem::BadSubscription))?;
-    let binding = Binding::parse(token, body)
-        .ok_or(AppError::BadRequest(Problem::BadSubscription))?
-        .with_locale(lang.locale);
+    let binding = Binding::parse(token, body, lang.locale)
+        .ok_or(AppError::BadRequest(Problem::BadSubscription))?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    if bind_with_preference(&mut tx, user.id(), &binding, true).await? != BindOutcome::Registered {
+    if bind_with_preference(&mut tx, user.id(), &binding, !query.automatic).await?
+        != BindOutcome::Registered
+    {
         return Err(AppError::BadRequest(Problem::AlertsFailed));
     }
     tx.commit().await?;
@@ -396,6 +444,7 @@ struct Subscription {
 pub(crate) struct Binding {
     locale: Locale,
     token_hash: [u8; 32],
+    identity_revision: i64,
     endpoint: String,
     p256dh: String,
     auth: String,
@@ -403,11 +452,11 @@ pub(crate) struct Binding {
 
 impl Binding {
     // The token is issued by the server and must be stored in an HttpOnly cookie.
-    pub(crate) fn parse(token: &str, json: &str) -> Option<Self> {
+    pub(crate) fn parse(token: &str, json: &str, locale: Locale) -> Option<Self> {
         if json.len() > 4096 {
             return None;
         }
-        let token_hash = token_hash(token)?;
+        let (_, token_hash, identity_revision) = device_token(token)?;
         let subscription: Subscription = serde_json::from_str(json).ok()?;
         if !valid_endpoint(&subscription.endpoint)
             || subscription.keys.p256dh.len() != 87
@@ -425,17 +474,13 @@ impl Binding {
             return None;
         }
         Some(Self {
-            locale: Locale::default(),
+            locale,
             token_hash,
+            identity_revision,
             endpoint: subscription.endpoint,
             p256dh: subscription.keys.p256dh,
             auth: subscription.keys.auth,
         })
-    }
-
-    pub(crate) fn with_locale(mut self, locale: Locale) -> Self {
-        self.locale = locale;
-        self
     }
 }
 
@@ -477,7 +522,7 @@ pub(crate) async fn bind(
     member_id: i64,
     binding: &Binding,
 ) -> Result<BindOutcome, sqlx::Error> {
-    bind_with_preference(tx, member_id, binding, true).await
+    bind_with_preference(tx, member_id, binding, false).await
 }
 
 async fn bind_with_preference(
@@ -490,12 +535,19 @@ async fn bind_with_preference(
         return Ok(BindOutcome::Unavailable);
     }
     let existing = sqlx::query(
-        "SELECT id, user_id, endpoint, p256dh, auth, enabled
+        "SELECT id, user_id, endpoint, p256dh, auth, enabled, identity_revision
          FROM push_devices WHERE token_hash = ?",
     )
     .bind(binding.token_hash.as_slice())
     .fetch_optional(&mut **tx)
     .await?;
+    if existing
+        .as_ref()
+        .map_or(0, |row| row.get::<i64, _>("identity_revision"))
+        != binding.identity_revision
+    {
+        return Ok(BindOutcome::Unavailable);
+    }
     let existing_id = existing.as_ref().map(|row| row.get::<i64, _>("id"));
     if existing
         .as_ref()
@@ -543,9 +595,11 @@ async fn bind_with_preference(
             .execute(&mut **tx)
             .await?;
         }
+        // A delayed enrollment must not undo a more recent language switch.
         sqlx::query(
-            "UPDATE push_devices SET user_id = ?, endpoint = ?, p256dh = ?, auth = ?, enabled = 1,
-             locale = ?, generation = generation + ?, updated_at = ? WHERE id = ?",
+            "UPDATE push_devices SET user_id = ?1, endpoint = ?2, p256dh = ?3, auth = ?4, enabled = 1,
+             locale = CASE WHEN user_id = ?1 THEN COALESCE(locale, ?5) ELSE ?5 END,
+             generation = generation + ?6, updated_at = ?7 WHERE id = ?8",
         )
         .bind(member_id)
         .bind(&binding.endpoint)
@@ -608,7 +662,7 @@ mod tests {
     }
 
     fn binding(byte: u8, endpoint: &str) -> Binding {
-        Binding::parse(&token(byte), &subscription(endpoint)).unwrap()
+        Binding::parse(&token(byte), &subscription(endpoint), super::Locale::En).unwrap()
     }
 
     async fn fixture() -> sqlx::SqlitePool {
@@ -830,11 +884,9 @@ mod tests {
         let pool = fixture().await;
         let app = router(pool.clone());
         let cookie = format!("user_id=2; push_device={}; hoopline_lang=de", token(1));
+        let subscription = subscription("https://fcm.googleapis.com/first");
         let body = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair(
-                "push_subscription",
-                &subscription("https://fcm.googleapis.com/first"),
-            )
+            .append_pair("push_subscription", &subscription)
             .finish();
         let response = app
             .clone()
@@ -856,14 +908,18 @@ mod tests {
             .unwrap();
         assert_eq!(original.0, "de");
 
-        for (user, expected) in [(3, "de"), (2, "en")] {
+        sqlx::query("UPDATE push_devices SET identity_revision = 2")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for (user, revision, expected) in [(3, 2, "de"), (2, 1, "de"), (2, 2, "en")] {
             let response = app
                 .clone()
                 .oneshot(
                     Request::post("/language")
                         .header(
                             header::COOKIE,
-                            format!("user_id={user}; push_device={}", token(1)),
+                            format!("user_id={user}; push_device={}.{revision}", token(1)),
                         )
                         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                         .body(Body::from("locale=en&return_to=%2Fslots"))
@@ -879,6 +935,23 @@ mod tests {
                     .unwrap();
             assert_eq!(actual, (expected.to_owned(), original.1));
         }
+
+        let response = app
+            .oneshot(request(
+                "POST",
+                "/push/subscribe?automatic=true",
+                &format!("user_id=2; push_device={}.2; hoopline_lang=de", token(1)),
+                "https://hoopline.example",
+                &subscription,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let actual: (String, i64) = sqlx::query_as("SELECT locale, generation FROM push_devices")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(actual, ("en".to_owned(), original.1));
     }
 
     #[tokio::test]
@@ -983,6 +1056,18 @@ mod tests {
             .unwrap();
         assert_eq!(generation, 1);
         let response = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/push/subscribe?automatic=true",
+                &cookie,
+                origin,
+                &body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let response = app
             .oneshot(request("POST", "/push/subscribe", &cookie, origin, &body))
             .await
             .unwrap();
@@ -1033,7 +1118,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn logout_detaches_only_owned_device_and_invalidates_jobs() {
+    async fn logout_detaches_only_owned_device_and_invalidates_jobs_even_when_push_is_off() {
         let pool = fixture().await;
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
         for n in 1..=2 {
@@ -1051,7 +1136,7 @@ mod tests {
         .unwrap();
         tx.commit().await.unwrap();
         let cookie = format!("user_id=2; push_device={}", token(1));
-        let response = router(pool.clone())
+        let response = crate::app_with_push_config(pool.clone(), super::Config::default())
             .oneshot(request("POST", "/users/logout", &cookie, "", ""))
             .await
             .unwrap();
@@ -1069,6 +1154,83 @@ mod tests {
         assert_eq!(jobs, vec!["skipped", "pending"]);
     }
 
+    #[tokio::test]
+    async fn logout_fences_old_enrollment_even_before_first_registration() {
+        let pool = fixture().await;
+        let app = router(pool.clone());
+        let old_cookie = format!("user_id=2; push_device={}", token(1));
+        let origin = "https://hoopline.example";
+        let body = subscription("https://fcm.googleapis.com/first");
+        let logout = app
+            .clone()
+            .oneshot(request("POST", "/users/logout", &old_cookie, "", ""))
+            .await
+            .unwrap();
+        let new_device = format!("push_device={}.1", token(1));
+        assert!(
+            logout
+                .headers()
+                .get_all(header::SET_COOKIE)
+                .iter()
+                .any(|cookie| cookie.to_str().unwrap().starts_with(&new_device))
+        );
+        let stale = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/push/subscribe?automatic=true",
+                &old_cookie,
+                origin,
+                &body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(stale.status(), StatusCode::BAD_REQUEST);
+        let old_binding = Binding::parse(&token(1), &body, super::Locale::En).unwrap();
+        assert_eq!(
+            signup_with_push(&pool, 1, 2, Some(&old_binding))
+                .await
+                .unwrap(),
+            (SignupOutcome::AddedWaitlist, Some(BindOutcome::Unavailable))
+        );
+        let new_cookie = format!("user_id=3; {new_device}");
+        let mut enrollment = request("POST", "/push/subscribe", &new_cookie, origin, &body);
+        enrollment
+            .headers_mut()
+            .insert("x-hoopline-user", "3".parse().unwrap());
+        let fresh = app.clone().oneshot(enrollment).await.unwrap();
+        assert_eq!(fresh.status(), StatusCode::OK);
+        let owner: i64 = sqlx::query_scalar("SELECT user_id FROM push_devices")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(owner, 3);
+
+        // Simulate an identity change after the browser did not retain the
+        // reissued revision. It must still detach the current binding.
+        let stale_cookie = format!("user_id=3; push_device={}", token(1));
+        let logout = app
+            .oneshot(request("POST", "/users/logout", &stale_cookie, "", ""))
+            .await
+            .unwrap();
+        assert_eq!(logout.status(), StatusCode::SEE_OTHER);
+        assert!(
+            logout
+                .headers()
+                .get_all(header::SET_COOKIE)
+                .iter()
+                .any(|cookie| cookie
+                    .to_str()
+                    .unwrap()
+                    .starts_with(&format!("push_device={}.2;", token(1))))
+        );
+        let owner: Option<i64> = sqlx::query_scalar("SELECT user_id FROM push_devices")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(owner, None);
+    }
+
     #[test]
     fn validates_endpoint_and_subscription_keys() {
         for endpoint in [
@@ -1077,7 +1239,9 @@ mod tests {
             "https://web.push.apple.com/abc",
             "https://1.push.apple.com/abc",
         ] {
-            assert!(Binding::parse(&token(1), &subscription(endpoint)).is_some());
+            assert!(
+                Binding::parse(&token(1), &subscription(endpoint), super::Locale::En).is_some()
+            );
         }
         for endpoint in [
             "http://fcm.googleapis.com/path",
@@ -1091,17 +1255,17 @@ mod tests {
             "https://localhost/path",
         ] {
             assert!(
-                Binding::parse(&token(1), &subscription(endpoint)).is_none(),
+                Binding::parse(&token(1), &subscription(endpoint), super::Locale::En).is_none(),
                 "{endpoint}"
             );
         }
         let mut invalid: serde_json::Value =
             serde_json::from_str(&subscription("https://fcm.googleapis.com/path")).unwrap();
         invalid["keys"]["p256dh"] = json!(URL_SAFE_NO_PAD.encode([4; 65]));
-        assert!(Binding::parse(&token(1), &invalid.to_string()).is_none());
+        assert!(Binding::parse(&token(1), &invalid.to_string(), super::Locale::En).is_none());
         invalid["keys"]["auth"] = json!("short");
-        assert!(Binding::parse("bad", &invalid.to_string()).is_none());
-        assert!(Binding::parse(&token(1), &"x".repeat(4097)).is_none());
+        assert!(Binding::parse("bad", &invalid.to_string(), super::Locale::En).is_none());
+        assert!(Binding::parse(&token(1), &"x".repeat(4097), super::Locale::En).is_none());
     }
 
     #[tokio::test]
@@ -1211,7 +1375,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn waitlist_signup_reenables_device_and_respects_device_limit() {
+    async fn waitlist_signup_keeps_alerts_off_and_respects_device_limit() {
         let pool = fixture().await;
         let first = binding(1, "https://fcm.googleapis.com/first");
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
@@ -1224,8 +1388,13 @@ mod tests {
         let result = signup_with_push(&pool, 1, 2, Some(&first)).await.unwrap();
         assert_eq!(
             result,
-            (SignupOutcome::AddedWaitlist, Some(BindOutcome::Registered))
+            (SignupOutcome::AddedWaitlist, Some(BindOutcome::Unavailable))
         );
+        let enabled: i64 = sqlx::query_scalar("SELECT enabled FROM push_devices")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(enabled, 0);
 
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
         for n in 2..=6 {

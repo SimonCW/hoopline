@@ -86,11 +86,11 @@ may not transfer. Installation is optional and does not grant notification
 permission. Android Chrome can also receive alerts in a browser tab. Booking
 needs an internet connection.
 
-When alerts are configured, select your name and choose **Enable promotion
-alerts** to grant permission and register this device. Joining a waitlist can
-also ask for permission and register this device. The booking succeeds even if alerts are unavailable
-or permission is refused. Change permission in your browser settings. Each
-device has its own permission. Delivery is best effort:
+When alerts are configured, **Join Waitlist** can ask for notification
+permission. Hoopline saves the booking without waiting for your answer. If
+you already allowed notifications, Hoopline sets up alerts without another
+tap. A crossed-out bell on a saved waitlist booking shows how to set up alerts
+or change browser settings. Each device has its own permission. Delivery is best effort:
 the push provider may accept an alert without the player seeing it. A push
 cannot be recalled after the provider accepts it. Check the roster for changes.
 

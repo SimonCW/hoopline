@@ -64,12 +64,14 @@ async fn language_form_redirects_only_to_safe_app_pages() {
     let app = app_with_pool(test_pool().await);
     for (target, expected) in [
         ("/slots?mode=admin", "/slots?mode=admin"),
+        ("/slots?mode=admin#slot-23", "/slots?mode=admin#slot-23"),
         ("/admin/slots/1/edit", "/admin/slots/1/edit"),
         ("https://example.com/slots", "/"),
         ("//example.com/slots", "/"),
         ("/slots\\@example.com", "/"),
         ("/%2Fexample.com/slots", "/"),
         ("/slots/fragment", "/"),
+        ("/slots#slot-1/../admin", "/"),
     ] {
         let form = url::form_urlencoded::Serializer::new(String::new())
             .append_pair("locale", "de")
