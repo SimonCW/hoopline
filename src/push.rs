@@ -167,37 +167,34 @@ pub(crate) async fn detach(
     headers: &HeaderMap,
     config: &Config,
 ) -> Result<Option<HeaderValue>, sqlx::Error> {
-    if config.origin.is_none() {
-        return Ok(None);
-    }
-    let Some((token, hash, revision)) = cookie_value(headers, "push_device").and_then(device_token)
-    else {
-        return Ok(None);
-    };
-    let Some(next) = revision.checked_add(1) else {
+    let Some((token, hash, _)) = cookie_value(headers, "push_device").and_then(device_token) else {
         return Ok(None);
     };
     if !device_capacity_available(tx, &hash).await? {
         return Ok(None);
     }
     let now = crate::clock::now().timestamp();
-    let change = sqlx::query(
+    // Use the stable token on identity changes. A lost response can leave a
+    // stale revision in the browser, but logout must still detach the device.
+    let next: Option<i64> = sqlx::query_scalar(
         "INSERT INTO push_devices (token_hash, created_at, updated_at, identity_revision)
-         VALUES (?, ?, ?, ?) ON CONFLICT(token_hash) DO UPDATE SET
+         SELECT ?, ?, ?, 1 WHERE ? OR EXISTS (
+             SELECT 1 FROM push_devices WHERE token_hash = ?
+         ) ON CONFLICT(token_hash) DO UPDATE SET
              user_id = NULL, generation = generation + (user_id IS NOT NULL),
-             updated_at = excluded.updated_at, identity_revision = excluded.identity_revision
-         WHERE identity_revision = ?",
+             updated_at = excluded.updated_at, identity_revision = identity_revision + 1
+         RETURNING identity_revision",
     )
     .bind(hash.as_slice())
     .bind(now)
     .bind(now)
-    .bind(next)
-    .bind(revision)
-    .execute(&mut **tx)
+    .bind(config.origin.is_some())
+    .bind(hash.as_slice())
+    .fetch_optional(&mut **tx)
     .await?;
-    if change.rows_affected() == 0 {
+    let Some(next) = next else {
         return Ok(None);
-    }
+    };
     sqlx::query(
         "UPDATE push_jobs SET status = 'skipped', completed_at = ?
          WHERE device_id = (SELECT id FROM push_devices WHERE token_hash = ?)
@@ -209,7 +206,7 @@ pub(crate) async fn detach(
     .await?;
     Ok(device_cookie_header(
         &format!("{token}.{next}"),
-        config.secure_cookie,
+        config.secure_cookie || config.origin.is_none(),
     ))
 }
 
@@ -270,7 +267,7 @@ pub(crate) async fn device_state(
     .fetch_optional(pool)
     .await?;
     Ok(match row {
-        Some(row) if row.get::<i64, _>("identity_revision") != revision => "unavailable",
+        Some(row) if row.get::<i64, _>("identity_revision") != revision => "stale",
         Some(row) if row.get::<i64, _>("enabled") == 0 => "disabled",
         Some(row) if member.is_some() && row.get::<Option<i64>, _>("user_id") == member => {
             if row.get::<Option<String>, _>("endpoint").is_some() {
@@ -279,7 +276,7 @@ pub(crate) async fn device_state(
                 "expired"
             }
         }
-        None if revision != 0 => "unavailable",
+        None if revision != 0 => "stale",
         _ => "unregistered",
     })
 }
@@ -1024,7 +1021,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn logout_detaches_only_owned_device_and_invalidates_jobs() {
+    async fn logout_detaches_only_owned_device_and_invalidates_jobs_even_when_push_is_off() {
         let pool = fixture().await;
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
         for n in 1..=2 {
@@ -1042,7 +1039,7 @@ mod tests {
         .unwrap();
         tx.commit().await.unwrap();
         let cookie = format!("user_id=2; push_device={}", token(1));
-        let response = router(pool.clone())
+        let response = crate::app_with_push_config(pool.clone(), super::Config::default())
             .oneshot(request("POST", "/users/logout", &cookie, "", ""))
             .await
             .unwrap();
@@ -1104,13 +1101,37 @@ mod tests {
         enrollment
             .headers_mut()
             .insert("x-hoopline-user", "3".parse().unwrap());
-        let fresh = app.oneshot(enrollment).await.unwrap();
+        let fresh = app.clone().oneshot(enrollment).await.unwrap();
         assert_eq!(fresh.status(), StatusCode::OK);
         let owner: i64 = sqlx::query_scalar("SELECT user_id FROM push_devices")
             .fetch_one(&pool)
             .await
             .unwrap();
         assert_eq!(owner, 3);
+
+        // Simulate an identity change after the browser did not retain the
+        // reissued revision. It must still detach the current binding.
+        let stale_cookie = format!("user_id=3; push_device={}", token(1));
+        let logout = app
+            .oneshot(request("POST", "/users/logout", &stale_cookie, "", ""))
+            .await
+            .unwrap();
+        assert_eq!(logout.status(), StatusCode::SEE_OTHER);
+        assert!(
+            logout
+                .headers()
+                .get_all(header::SET_COOKIE)
+                .iter()
+                .any(|cookie| cookie
+                    .to_str()
+                    .unwrap()
+                    .starts_with(&format!("push_device={}.2;", token(1))))
+        );
+        let owner: Option<i64> = sqlx::query_scalar("SELECT user_id FROM push_devices")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(owner, None);
     }
 
     #[test]

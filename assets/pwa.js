@@ -34,14 +34,15 @@
     const appleMobile = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
         (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
     const permission = () => supported ? Notification.permission : "unsupported";
-    const available = () => status?.available && status.state !== "unavailable";
+    const available = () => status?.available && status.state !== "unavailable" && status.state !== "stale";
     const canPrompt = () => available() && status.state !== "disabled" && permission() === "default" && !prompted;
 
     function render() {
         document.querySelectorAll("[data-alert-hint]").forEach(hint => { hint.hidden = !canPrompt(); });
         const on = status?.state === "registered" && permission() === "granted";
         const canEnable = available() && supported && permission() !== "denied";
-        const help = !available() ? "Alerts are unavailable. Check your booking here."
+        const help = status?.state === "stale" ? "Log out and select your name again to set up alerts on this device."
+            : !available() ? "Alerts are unavailable. Check your booking here."
             : !supported && appleMobile && !standalone
                 ? "On iPhone or iPad, choose Share → Add to Home Screen. Select Open as Web App if offered, then open Hoopline there and select your name."
             : !supported ? "This browser cannot receive alerts. Check your booking here."
@@ -91,7 +92,7 @@
 
     async function prepare(explicit = false) {
         const current = await refreshStatus();
-        if (!current?.available || !current.public_key || current.state === "unavailable" ||
+        if (!current?.available || !current.public_key || current.state === "unavailable" || current.state === "stale" ||
             (!explicit && current.state === "disabled")) return null;
         const registration = await worker;
         if (!registration) return null;
