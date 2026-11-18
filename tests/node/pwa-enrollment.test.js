@@ -12,13 +12,17 @@ async function page({ state = "unregistered", permission = "granted", existing =
             subscribe: async options => { calls.push(options); return subscription; }
         }
     };
-    const button = { hidden: true, addEventListener() {} };
     const window = { addEventListener() {}, PushManager: class {}, Notification: {} };
     const context = {
         window,
         navigator: { serviceWorker: { register: async () => registration, ready: readyGate ? readyGate.then(() => registration) : Promise.resolve(registration) } },
         Notification: { permission },
-        document: { getElementById: () => null, querySelectorAll: () => [button] },
+        document: {
+            getElementById: () => ({ dataset: { userId: "1" } }),
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            body: { addEventListener() {} }
+        },
         fetch: async () => ({ ok: true, json: async () => ({ available: true, state, public_key: "AQID" }) }),
         atob, Uint8Array, AbortController, setTimeout, clearTimeout
     };
@@ -42,13 +46,12 @@ test("existing subscription is reused", async () => {
     assert.equal(calls.length, 0);
 });
 
-test("waitlist signup can request permission and reenable a device", async () => {
+test("only explicit setup can reenable a disabled device", async () => {
     const disabled = await page({ state: "disabled" });
-    assert.equal(disabled.push.shouldPrepare(true), true);
+    assert.equal(disabled.push.shouldPrepare(), false);
     assert.equal(await disabled.push.prepare(), null);
     assert.equal(await disabled.push.prepare(true), '{"endpoint":"test"}');
-    assert.equal((await page({ permission: "default" })).push.shouldPrepare(), false);
-    assert.equal((await page({ permission: "default" })).push.shouldPrepare(true), true);
+    assert.equal((await page({ state: "disabled", permission: "default" })).push.promptOnJoin(), undefined);
 });
 
 test("expired registration replaces the stale subscription", async () => {

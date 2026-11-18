@@ -4,6 +4,9 @@ Status: Implemented. Automated checks passed; physical-device and container chec
 Date: 2026-11-13.
 Baseline: `main` at `66d7278`. PR #11 and PR #12 are merged in this baseline.
 
+The permission flow below is historical. See the [README](../README.md#promotion-alerts-and-installation)
+for the current waitlist controls.
+
 ## 1. Result and Scope
 
 Make Hoopline installable as a small, online-only PWA. Add Web Push alerts when
