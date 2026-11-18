@@ -68,7 +68,7 @@ impl FromRequestParts<SqlitePool> for AdminIdentity {
         let user = current_user_from_headers(pool, &parts.headers)
             .await?
             .filter(|user| user.is_admin)
-            .ok_or_else(|| AppError::Forbidden("admin access required".into()))?;
+            .ok_or(AppError::Forbidden(crate::error::Problem::AdminRequired))?;
         Ok(Self(BookingIdentity::checked(user, &parts.headers)?))
     }
 }
@@ -96,7 +96,7 @@ pub(crate) async fn current_user_from_headers(
     Ok(None)
 }
 
-fn user_id_from_cookie(headers: &HeaderMap) -> Option<i64> {
+pub(crate) fn user_id_from_cookie(headers: &HeaderMap) -> Option<i64> {
     cookie_value(headers, "user_id")?.parse().ok()
 }
 

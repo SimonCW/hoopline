@@ -5,6 +5,15 @@
 Hoopline is a lightweight booking app for recurring pickup basketball slots.
 It focuses on fair waitlist handling, clear accountability, and less weekly admin work.
 
+## Language
+
+Choose **Deutsch** or **English** at the top of any player or admin page.
+Hoopline starts with a supported browser language or uses English if none
+matches. Your choice stays on this browser. It does not change your selected
+name, your bookings, or the Berlin time zone used for games. If this device has
+an active waitlist alert subscription for your selected name, the switch also
+changes the language of its alerts.
+
 ## Run locally
 
 ```sh

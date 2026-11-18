@@ -132,6 +132,8 @@ impl Sender {
 }
 
 fn payload(delivery: &Delivery) -> Result<(String, Option<i64>), &'static str> {
+    let locale = delivery.locale;
+    let text = locale.text();
     let (title, body, url, tag, deadline) = if let Some(booking) = delivery.booking_id {
         let slot = delivery.slot_id.ok_or("missing slot")?;
         let datetime =
@@ -140,26 +142,24 @@ fn payload(delivery: &Delivery) -> Result<(String, Option<i64>), &'static str> {
         let venue = delivery.venue.as_deref().ok_or("missing venue")?;
         let local = datetime.with_timezone(&Berlin);
         (
-            "You're playing! 🏀",
-            format!(
-                "You moved off the waitlist for {} at {}. Open Hoopline to check your booking.",
-                local.format("%A %d %B at %H:%M"),
-                venue
-            ),
+            text.push_promotion,
+            locale.promotion_message(local, venue),
             format!("/slots#slot-{slot}"),
             Some(format!("promotion:{booking}")),
             Some(datetime.timestamp()),
         )
     } else {
         (
-            "Hoopline test alert",
-            "Promotion alerts are enabled on this device.".to_owned(),
+            text.push_test,
+            text.push_test_body.to_owned(),
             "/slots".to_owned(),
             None,
             None,
         )
     };
-    let encoded = json!({ "title": title, "body": body, "url": url, "tag": tag }).to_string();
+    let encoded =
+        json!({ "title": title, "body": body, "url": url, "tag": tag, "lang": locale.code() })
+            .to_string();
     if encoded.len() > 3000 {
         return Err("payload too large");
     }
@@ -299,6 +299,7 @@ mod tests {
 
     fn delivery() -> Delivery {
         Delivery {
+            locale: crate::i18n::Locale::En,
             endpoint: "https://fcm.googleapis.com/test".into(),
             p256dh: PUBLIC_SUBSCRIPTION.into(),
             auth: AUTH.into(),
@@ -308,6 +309,22 @@ mod tests {
             datetime: Some("2099-01-01T19:00:00Z".into()),
             venue: Some("Court".into()),
         }
+    }
+
+    #[test]
+    fn german_push_payload_uses_berlin_time_and_localized_copy() {
+        let mut delivery = delivery();
+        delivery.locale = crate::i18n::Locale::De;
+        let (plain, _) = payload(&delivery).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&plain).unwrap();
+        assert_eq!(json["title"], "Du spielst mit! 🏀");
+        assert_eq!(json["lang"], "de");
+        assert!(json["body"].as_str().unwrap().contains("20:00 Uhr"));
+
+        delivery.booking_id = None;
+        let (plain, _) = payload(&delivery).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&plain).unwrap();
+        assert_eq!(json["title"], "Hoopline-Testnachricht");
     }
 
     #[test]

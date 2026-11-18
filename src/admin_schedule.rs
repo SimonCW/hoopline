@@ -12,7 +12,8 @@ use serde::Deserialize;
 use sqlx::{Row, SqlitePool};
 
 use crate::{
-    error::AppError,
+    error::{AppError, Problem},
+    i18n::Language,
     identity::{AdminIdentity, current_user_from_headers},
     identity_redirect, scheduling,
 };
@@ -32,7 +33,8 @@ struct Schedule {
 #[derive(Template)]
 #[template(path = "admin_schedule.html")]
 struct SchedulePage {
-    title: String,
+    lang: Language,
+    title: &'static str,
     user_id: i64,
     schedules: Vec<Schedule>,
     release: String,
@@ -60,12 +62,13 @@ pub(crate) struct ReleaseForm {
 
 pub(crate) async fn page(
     State(pool): State<SqlitePool>,
+    lang: Language,
     headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
     let user = current_user_from_headers(&pool, &headers)
         .await?
         .filter(|user| user.is_admin)
-        .ok_or_else(|| AppError::Forbidden("admin access required".into()))?;
+        .ok_or(AppError::Forbidden(Problem::AdminRequired))?;
     let rows = sqlx::query("SELECT id, weekday, time_local, venue, map_url, max_players, max_waitlist, is_active, revision FROM slot_schedules ORDER BY weekday, time_local, id")
         .fetch_all(&pool).await?;
     let schedules = rows
@@ -90,19 +93,14 @@ pub(crate) async fn page(
             .await?;
     let release: String = settings.try_get("sunday_release_time")?;
     let time = NaiveTime::parse_from_str(&release, "%H:%M")
-        .map_err(|_| AppError::BadRequest("Invalid release time.".into()))?;
+        .map_err(|_| AppError::BadRequest(Problem::InvalidReleaseTime))?;
     let (next, monday) = scheduling::next_release(crate::clock::now(), time)
-        .map_err(|message| AppError::BadRequest(message.into()))?;
-    let next_release = format!(
-        "{} Berlin time opens games for {} to {}",
-        next.with_timezone(&chrono_tz::Europe::Berlin)
-            .format("%d.%m.%Y %H:%M"),
-        monday.format("%d.%m.%Y"),
-        (monday + chrono::Days::new(6)).format("%d.%m.%Y")
-    );
+        .map_err(|_| AppError::BadRequest(Problem::InvalidReleaseTime))?;
+    let next_release = lang.locale.release_summary(next, monday);
     Ok(Html(
         SchedulePage {
-            title: "Recurring schedule".into(),
+            title: lang.text.recurring_schedule,
+            lang,
             user_id: user.id,
             schedules,
             release,
@@ -121,9 +119,7 @@ fn validate(form: &ScheduleForm) -> Result<(), AppError> {
         || form.venue.trim().chars().count() > 120
         || NaiveTime::parse_from_str(&form.time_local, "%H:%M").is_err()
     {
-        return Err(AppError::BadRequest(
-            "Check the weekday, time, location, and capacities.".into(),
-        ));
+        return Err(AppError::BadRequest(Problem::BadSchedule));
     }
     Ok(())
 }
@@ -168,11 +164,9 @@ pub(crate) async fn release_time(
     Form(form): Form<ReleaseForm>,
 ) -> Result<Response, AppError> {
     let time = NaiveTime::parse_from_str(&form.sunday_release_time, "%H:%M")
-        .map_err(|_| AppError::BadRequest("Enter a valid release time.".into()))?;
+        .map_err(|_| AppError::BadRequest(Problem::BadReleaseTime))?;
     if time.hour() < 4 {
-        return Err(AppError::BadRequest(
-            "Choose a release time from 04:00 to 23:59 to avoid daylight-saving changes.".into(),
-        ));
+        return Err(AppError::BadRequest(Problem::UnsafeReleaseTime));
     }
     let result = sqlx::query("UPDATE schedule_settings SET sunday_release_time=?, revision=revision+1 WHERE id=1 AND revision=?")
         .bind(time.format("%H:%M").to_string()).bind(form.revision).execute(&pool).await?;

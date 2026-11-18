@@ -1,6 +1,7 @@
 /* Keep bookings server-confirmed. Never show success before the response arrives. */
 (() => {
     const body = document.body;
+    const messages = body.dataset;
     const announcement = document.getElementById("announcements");
     let pending = false;
     let refreshQueued = false;
@@ -9,9 +10,17 @@
     let pageGeneration = 0;
     const openRosters = new Set();
     const waitlistEnrollments = new WeakMap();
+    const languageChanged = locale => (locale === "en" || locale === "de") && locale !== document.documentElement.lang;
+
+    document.querySelector(".language-picker")?.addEventListener("submit", event => {
+        const { pathname, search, hash } = window.location;
+        if (pathname === "/slots" && /^#slot-[0-9]+$/.test(hash)) {
+            event.currentTarget.elements.return_to.value = pathname + search + hash;
+        }
+    });
 
     function disableBookingControls() {
-        document.querySelectorAll('#slots-content button:not([data-enable-alerts]), #user-selector form button, #refresh-slots, .admin-editor button').forEach(button => {
+        document.querySelectorAll('#slots-content button:not([data-enable-alerts]), #user-selector form button, #refresh-slots, .admin-editor button, .language-picker button').forEach(button => {
             // Only restore controls disabled by this request, not disabled slot states.
             if (!button.disabled) {
                 button.dataset.requestDisabled = "";
@@ -50,7 +59,7 @@
     }
 
     if (!window.htmx) {
-        showError(null, "Booking controls could not load. Check your connection and reload this page.");
+        showError(null, messages.controlsFailed);
         document.querySelectorAll("form:not([action]) button").forEach(button => { button.disabled = true; });
         return;
     }
@@ -78,7 +87,7 @@
         form.querySelectorAll("[data-push-preparation]").forEach(input => input.remove());
         disableBookingControls();
         const status = document.getElementById("booking-request-status");
-        status.textContent = "Preparing booking. Booking controls are temporarily unavailable.";
+        status.textContent = messages.preparingBooking;
         status.hidden = false;
         let timer;
         const prepared = push.prepare().catch(() => null);
@@ -116,7 +125,7 @@
     });
     body.addEventListener("htmx:beforeRequest", (event) => {
         if (event.detail.elt.closest('.admin-editor')?.querySelector('[name="bookings"]:checked')?.value === 'clear' &&
-            !window.confirm('Clear all player and waitlist bookings? No notifications will be sent.')) {
+            !window.confirm(event.detail.elt.dataset.confirmClear)) {
             event.preventDefault();
             return;
         }
@@ -128,9 +137,9 @@
         }
         disableBookingControls();
         const status = document.getElementById("booking-request-status");
-        status.textContent = document.getElementById("name-step") ? "Opening your games."
-            : event.detail.requestConfig.verb === "get" ? "Updating slots. Booking controls are temporarily unavailable."
-                : "Saving changes. Booking controls are temporarily unavailable.";
+        status.textContent = document.getElementById("name-step") ? messages.openingGames
+            : event.detail.requestConfig.verb === "get" ? messages.refreshingGames
+                : messages.savingChanges;
         status.hidden = false;
         const scope = event.detail.elt.closest(".slot-card, #name-step, #user-selector, .admin-editor") || event.detail.elt;
         scope.setAttribute("aria-busy", "true");
@@ -160,16 +169,19 @@
             if (roster) roster.open = true;
         });
     });
-    body.addEventListener("htmx:responseError", (event) => {
-        if (event.detail.xhr.status === 429) {
-            showError(event.detail.elt, "Too many requests. Please wait and try again.");
-            return;
+    body.addEventListener("htmx:beforeOnLoad", event => {
+        if (languageChanged(event.detail.xhr.getResponseHeader("Content-Language"))) {
+            // Another tab changed the shared cookie. Do not mix languages in this page.
+            event.preventDefault();
+            window.location.reload();
         }
+    });
+    body.addEventListener("htmx:responseError", (event) => {
         const doc = new DOMParser().parseFromString(event.detail.xhr.responseText, "text/html");
-        showError(event.detail.elt, doc.querySelector("main p")?.textContent?.trim() || "Request failed. Refresh and check your booking before trying again.");
+        showError(event.detail.elt, doc.querySelector("main p")?.textContent?.trim() || messages.requestFallback);
     });
     ["htmx:sendError", "htmx:timeout"].forEach(type => body.addEventListener(type, event => {
-        showError(event.detail.elt, "Connection failed. We could not confirm your booking. Refresh and check your status before trying again.");
+        showError(event.detail.elt, messages.connectionFailed);
     }));
     body.addEventListener("htmx:afterSettle", (event) => {
         // Out-of-band identity updates also emit this event for the same request.
@@ -191,7 +203,7 @@
         if (target.id === "slots-content" && focusAfterSwap) {
             document.getElementById("refresh-slots")?.focus({ preventScroll: true });
             focusAfterSwap = false;
-            announce("Upcoming slots refreshed.");
+            announce(messages.refreshed);
         }
         if (refreshQueued) {
             refreshQueued = false;
@@ -208,7 +220,16 @@
     document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
     window.addEventListener("pageshow", event => {
         leaving = false;
-        if (event.persisted) refresh();
+        if (!event.persisted) return;
+        if (document.getElementById("slots-content")) {
+            refresh();
+        } else {
+            fetch(window.location.href, { method: "HEAD", cache: "no-store" })
+                .then(response => {
+                    if (!leaving && languageChanged(response.headers.get("Content-Language"))) window.location.reload();
+                })
+                .catch(() => {});
+        }
     });
 })();
 const themeSelect = document.getElementById('theme-select');

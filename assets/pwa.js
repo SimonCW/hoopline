@@ -17,6 +17,7 @@
         if (installButton) installButton.hidden = true;
     });
     if (!controls) return;
+    const messages = controls.dataset;
 
     function renderedStatus() {
         const state = document.getElementById("slots-content")?.dataset.pushState || "unavailable";
@@ -41,13 +42,13 @@
         document.querySelectorAll("[data-alert-hint]").forEach(hint => { hint.hidden = !canPrompt(); });
         const on = status?.state === "registered" && permission() === "granted";
         const canEnable = available() && supported && permission() !== "denied";
-        const help = status?.state === "stale" ? "Log out and select your name again to set up alerts on this device."
-            : !available() ? "Alerts are unavailable. Check your booking here."
+        const help = status?.state === "stale" ? messages.stale
+            : !available() ? messages.unavailable
             : !supported && appleMobile && !standalone
-                ? "On iPhone or iPad, choose Share → Add to Home Screen. Select Open as Web App if offered, then open Hoopline there and select your name."
-            : !supported ? "This browser cannot receive alerts. Check your booking here."
-            : permission() === "denied" ? "Allow notifications in your browser or device settings."
-            : "Get an alert if you move up. Check your booking here if no alert arrives.";
+                ? messages.install
+            : !supported ? messages.unsupported
+            : permission() === "denied" ? messages.blocked
+            : messages.help;
         document.querySelectorAll("[data-waitlist-alerts]").forEach(details => {
             if (on && details.contains(document.activeElement)) details.closest(".slot-card").querySelector("h3").focus({ preventScroll: true });
             details.hidden = on;
@@ -221,12 +222,12 @@
             return;
         }
         settingUp = true;
-        feedback("Setting up alerts…");
+        feedback(messages.settingUp);
         const enabled = await enroll(identity, cardId, true);
         if (enabled && identity === controls.dataset.userId) {
-            document.getElementById("announcements").textContent = "Promotion alerts are on for this device.";
+            document.getElementById("announcements").textContent = messages.on;
         } else {
-            feedback("Alerts could not be enabled. Try again.");
+            feedback(messages.failed);
         }
         settingUp = false;
         refreshStatus();

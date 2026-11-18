@@ -1,13 +1,14 @@
 use std::{str::FromStr, time::Duration};
 
-use chrono::{DateTime, Datelike, Days, NaiveTime, SecondsFormat, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Days, NaiveDate, NaiveTime, SecondsFormat, TimeZone, Utc};
 use chrono_tz::Europe::Berlin;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
 
 use crate::{
     activity::{ActivityKind, BookingActivity, record_booking},
-    error::AppError,
+    error::{AppError, Problem},
+    i18n::Locale,
     models::{Slot, UserIdentity},
 };
 
@@ -34,7 +35,7 @@ async fn checked_admin_slot(
         .bind(slot_id)
         .fetch_optional(&mut **tx)
         .await?
-        .ok_or_else(|| AppError::BadRequest("Game does not exist.".into()))?;
+        .ok_or(AppError::BadRequest(Problem::GameMissing))?;
     if row.try_get::<i64, _>("revision")? != revision {
         return Err(AppError::StaleSlot);
     }
@@ -55,7 +56,7 @@ pub(crate) async fn admin_add_member(
         .fetch_one(&mut *tx)
         .await?;
     if !exists {
-        return Err(AppError::BadRequest("Member does not exist.".into()));
+        return Err(AppError::BadRequest(Problem::MemberMissing));
     }
     let duplicate: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM bookings WHERE slot_id = ? AND user_id = ?)",
@@ -65,9 +66,7 @@ pub(crate) async fn admin_add_member(
     .fetch_one(&mut *tx)
     .await?;
     if duplicate {
-        return Err(AppError::BadRequest(
-            "Member is already on this game.".into(),
-        ));
+        return Err(AppError::BadRequest(Problem::DuplicateMember));
     }
     let (is_waitlist, capacity) = match list {
         RosterList::Players => (0_i64, max_players),
@@ -80,7 +79,7 @@ pub(crate) async fn admin_add_member(
             .fetch_one(&mut *tx)
             .await?;
     if count >= capacity {
-        return Err(AppError::BadRequest("The selected list is full.".into()));
+        return Err(AppError::BadRequest(Problem::SelectedListFull));
     }
     sqlx::query(
         "INSERT INTO bookings (slot_id, user_id, position, is_waitlist, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -113,7 +112,7 @@ pub(crate) async fn admin_move_waiter(
     .bind(user_id)
     .fetch_optional(&mut *tx)
     .await?
-    .ok_or_else(|| AppError::BadRequest("Member is not on this waitlist.".into()))?;
+    .ok_or(AppError::BadRequest(Problem::MemberNotWaiting))?;
     let other = position
         + match direction {
             MoveDirection::Up => -1,
@@ -126,7 +125,7 @@ pub(crate) async fn admin_move_waiter(
     .bind(other)
     .fetch_optional(&mut *tx)
     .await?
-    .ok_or_else(|| AppError::BadRequest("Member cannot move further in that direction.".into()))?;
+    .ok_or(AppError::BadRequest(Problem::CannotMoveMember))?;
     sqlx::query("UPDATE bookings SET position = ? WHERE id = ?")
         .bind(position)
         .bind(other_id)
@@ -156,7 +155,7 @@ pub(crate) async fn edit_game(pool: &SqlitePool, edit: &GameEdit) -> Result<(), 
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     checked_admin_slot(&mut tx, edit.slot_id, edit.revision).await?;
     if edit.datetime <= crate::clock::now() {
-        return Err(AppError::BadRequest("Choose a future time.".into()));
+        return Err(AppError::BadRequest(Problem::PastGameTime));
     }
     let row = sqlx::query("SELECT datetime, venue, map_url, schedule_id FROM slots WHERE id = ?")
         .bind(edit.slot_id)
@@ -167,11 +166,9 @@ pub(crate) async fn edit_game(pool: &SqlitePool, edit: &GameEdit) -> Result<(), 
     let old_map_url: String = row.try_get("map_url")?;
     let map_url = edit.map_url.as_deref().unwrap_or(&old_map_url);
     let old = DateTime::parse_from_rfc3339(&old_datetime)
-        .map_err(|_| AppError::BadRequest("The existing game time is invalid.".into()))?;
+        .map_err(|_| AppError::BadRequest(Problem::InvalidExistingTime))?;
     if old.with_timezone(&Utc) <= crate::clock::now() {
-        return Err(AppError::BadRequest(
-            "This game has already started.".into(),
-        ));
+        return Err(AppError::BadRequest(Problem::GameStarted));
     }
     if old.with_timezone(&Utc) == edit.datetime && old_venue == edit.venue {
         if old_map_url != map_url {
@@ -189,17 +186,13 @@ pub(crate) async fn edit_game(pool: &SqlitePool, edit: &GameEdit) -> Result<(), 
         .fetch_one(&mut *tx)
         .await?;
     if count > 0 && edit.clear_bookings.is_none() {
-        return Err(AppError::BadRequest(
-            "Choose whether to keep or clear bookings.".into(),
-        ));
+        return Err(AppError::BadRequest(Problem::ChooseBookingAction));
     }
     let collision: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM slots WHERE id != ? AND venue = ? AND julianday(datetime) = julianday(?))")
         .bind(edit.slot_id).bind(&edit.venue).bind(edit.datetime.to_rfc3339())
         .fetch_one(&mut *tx).await?;
     if collision {
-        return Err(AppError::BadRequest(
-            "A game already exists at this date, time, and location.".into(),
-        ));
+        return Err(AppError::BadRequest(Problem::DuplicateGame));
     }
     if row.try_get::<Option<i64>, _>("schedule_id")?.is_none() {
         sqlx::query(
@@ -321,7 +314,7 @@ pub async fn create_upcoming_slots(
 ) -> Result<i64, sqlx::Error> {
     let report = create_upcoming_slots_report(pool, now).await?;
     for warning in &report.warnings {
-        eprintln!("slot generation: {warning}");
+        eprintln!("slot generation: {}", warning.message(Locale::En));
     }
     Ok(report.created)
 }
@@ -432,7 +425,33 @@ async fn fill_preview_list(
 
 pub(crate) struct GenerationReport {
     pub created: i64,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<GenerationWarning>,
+}
+
+pub(crate) enum GenerationWarning {
+    InvalidTime { venue: String, date: NaiveDate },
+    Duplicate { venue: String, date: NaiveDate },
+}
+
+impl GenerationWarning {
+    pub(crate) fn message(&self, locale: Locale) -> String {
+        match (self, locale) {
+            (Self::InvalidTime { venue, date }, Locale::En) => {
+                format!("Skipped {venue} on {date}: local time is invalid or ambiguous.")
+            }
+            (Self::Duplicate { venue, date }, Locale::En) => {
+                format!("Skipped {venue} on {date}: another game uses this time and location.")
+            }
+            (Self::InvalidTime { venue, date }, Locale::De) => format!(
+                "{venue} am {} übersprungen: Die Uhrzeit ist ungültig oder nicht eindeutig.",
+                date.format("%d.%m.%Y")
+            ),
+            (Self::Duplicate { venue, date }, Locale::De) => format!(
+                "{venue} am {} übersprungen: An diesem Ort findet zur selben Zeit bereits ein Spiel statt.",
+                date.format("%d.%m.%Y")
+            ),
+        }
+    }
 }
 
 pub(crate) async fn create_upcoming_slots_report(
@@ -478,10 +497,10 @@ pub(crate) async fn create_upcoming_slots_report(
                 .from_local_datetime(&target_date.and_time(time))
                 .single()
             else {
-                warnings.push(format!(
-                    "Skipped {} on {target_date}: local time is invalid or ambiguous.",
-                    schedule.venue
-                ));
+                warnings.push(GenerationWarning::InvalidTime {
+                    venue: schedule.venue.clone(),
+                    date: target_date,
+                });
                 continue;
             };
             if local <= now {
@@ -494,10 +513,10 @@ pub(crate) async fn create_upcoming_slots_report(
                 .bind(&schedule.venue).bind(&datetime).bind(schedule.id).bind(target_date.to_string())
                 .fetch_one(&mut *tx).await?;
             if collision {
-                warnings.push(format!(
-                    "Skipped {} on {target_date}: another game uses this time and location.",
-                    schedule.venue
-                ));
+                warnings.push(GenerationWarning::Duplicate {
+                    venue: schedule.venue.clone(),
+                    date: target_date,
+                });
                 continue;
             }
             // Keep existing booked slots, including slots created under the old UTC schedule.

@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="card welcome-card" aria-labelledby="admin-login-title">
-    <h1 id="admin-login-title">Admin login</h1>
-    <p>Enter the admin password to open the admin UI as {{ user_name }}.</p>
+    <h1 id="admin-login-title">{{ lang.text.admin_login }}</h1>
+    <p>{{ lang.locale.admin_login_help(user_name) }}</p>
     {% if !error.is_empty() %}<p role="alert">{{ error }}</p>{% endif %}
     <form action="/admin/login" method="post" class="identity-form">
         <input type="hidden" name="user_id" value="{{ user_id }}">
-        <label for="admin-password">Password</label>
+        <label for="admin-password">{{ lang.text.password }}</label>
         <input id="admin-password" name="password" type="password" autocomplete="current-password" autofocus required>
-        <button type="submit" class="btn btn-primary">Enter admin UI</button>
+        <button type="submit" class="btn btn-primary">{{ lang.text.enter_admin }}</button>
     </form>
-    <a href="/slots">Back to games</a>
+    <a href="/slots">{{ lang.text.back_to_games }}</a>
 </section>
 {% endblock %}

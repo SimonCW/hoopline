@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Timelike};
+use chrono::{DateTime, Datelike, NaiveDate};
 use chrono_tz::{Europe::Berlin, Tz};
 
 #[derive(Clone, Debug)]
@@ -19,7 +19,7 @@ pub struct Slot {
 
 #[derive(Clone, Debug)]
 pub struct SlotWeek {
-    pub label: String,
+    pub monday: Option<NaiveDate>,
     pub key: String,
     pub slots: Vec<Slot>,
 }
@@ -30,7 +30,7 @@ pub fn group_slots(slots: Vec<Slot>) -> Vec<SlotWeek> {
         let key = slot.week_key();
         if weeks.last().is_none_or(|week| week.key != key) {
             weeks.push(SlotWeek {
-                label: slot.week_label(),
+                monday: slot.week_start(),
                 key,
                 slots: Vec::new(),
             });
@@ -40,6 +40,15 @@ pub fn group_slots(slots: Vec<Slot>) -> Vec<SlotWeek> {
         }
     }
     weeks
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BookingStatus {
+    Waiting(usize),
+    Confirmed,
+    Started,
+    Open,
+    Full,
 }
 
 impl Slot {
@@ -55,20 +64,6 @@ impl Slot {
     pub fn has_user(&self, user_id: &i64) -> bool {
         self.player_user_ids.contains(user_id) || self.waitlist_user_ids.contains(user_id)
     }
-    pub fn datetime_label_de(&self) -> String {
-        let Some(parsed) = self.parsed_datetime() else {
-            return self.datetime.clone();
-        };
-        format!(
-            "{}, {:02}.{:02}.{:02} · {:02}:{:02}",
-            weekday_short_de(parsed.weekday()),
-            parsed.day(),
-            parsed.month(),
-            parsed.year_ce().1 % 100,
-            parsed.hour(),
-            parsed.minute()
-        )
-    }
 
     pub fn user_is_signed_up(&self, current_user_id: &Option<i64>) -> bool {
         current_user_id.is_some_and(|user_id| {
@@ -83,14 +78,6 @@ impl Slot {
     pub fn can_accept_signup(&self) -> bool {
         !self.has_started()
             && (self.players.len() < self.max_players || self.waitlist.len() < self.max_waitlist)
-    }
-
-    pub fn signup_action_label(&self) -> &'static str {
-        if self.players.len() < self.max_players {
-            "Sign Up"
-        } else {
-            "Join Waitlist"
-        }
     }
 
     pub fn player_is_current_user(&self, index: &usize, current_user_id: &Option<i64>) -> bool {
@@ -140,21 +127,21 @@ impl Slot {
             .is_none_or(|time| time <= crate::clock::now())
     }
 
-    pub fn booking_status(&self, user_id: &Option<i64>) -> String {
+    pub(crate) fn booking_status(&self, user_id: Option<i64>) -> BookingStatus {
         if let Some(position) =
             user_id.and_then(|id| self.waitlist_user_ids.iter().position(|user| *user == id))
         {
-            return format!("Waitlist #{}", position + 1);
+            return BookingStatus::Waiting(position + 1);
         }
         if user_id.is_some_and(|id| self.player_user_ids.contains(&id)) {
-            return "Confirmed 🏀".into();
+            return BookingStatus::Confirmed;
         }
         if self.has_started() {
-            "Slot has started".into()
+            BookingStatus::Started
         } else if self.can_accept_signup() {
-            "Not booked".into()
+            BookingStatus::Open
         } else {
-            "Slot full".into()
+            BookingStatus::Full
         }
     }
 
@@ -163,30 +150,18 @@ impl Slot {
             .map_or_else(String::new, |time| time.format("%G-W%V").to_string())
     }
 
-    pub fn week_label(&self) -> String {
-        self.parsed_datetime().map_or_else(String::new, |time| {
-            let monday = time.date_naive()
-                - chrono::Days::new(u64::from(time.weekday().num_days_from_monday()));
-            format!("Week of {}", monday.format("%d.%m.%Y"))
-        })
+    fn week_start(&self) -> Option<NaiveDate> {
+        let time = self.parsed_datetime()?;
+        time.date_naive()
+            .checked_sub_days(chrono::Days::new(u64::from(
+                time.weekday().num_days_from_monday(),
+            )))
     }
 
-    fn parsed_datetime(&self) -> Option<DateTime<Tz>> {
+    pub(crate) fn parsed_datetime(&self) -> Option<DateTime<Tz>> {
         DateTime::parse_from_rfc3339(&self.datetime)
             .ok()
             .map(|value| value.with_timezone(&Berlin))
-    }
-}
-
-fn weekday_short_de(day: chrono::Weekday) -> &'static str {
-    match day {
-        chrono::Weekday::Mon => "Mo",
-        chrono::Weekday::Tue => "Di",
-        chrono::Weekday::Wed => "Mi",
-        chrono::Weekday::Thu => "Do",
-        chrono::Weekday::Fri => "Fr",
-        chrono::Weekday::Sat => "Sa",
-        chrono::Weekday::Sun => "So",
     }
 }
 
@@ -199,7 +174,8 @@ pub struct UserIdentity {
 
 #[cfg(test)]
 mod tests {
-    use super::{Slot, group_slots};
+    use super::{BookingStatus, Slot, group_slots};
+    use crate::i18n::Locale;
 
     fn slot(datetime: &str) -> Slot {
         Slot {
@@ -221,26 +197,26 @@ mod tests {
     #[test]
     fn status_and_capacity_use_the_slot_limits() {
         let mut slot = slot("2099-01-05T19:00:00Z");
-        assert_eq!(slot.booking_status(&Some(1)), "Confirmed 🏀");
-        assert_eq!(slot.booking_status(&Some(2)), "Waitlist #1");
-        assert_eq!(slot.booking_status(&Some(3)), "Slot full");
+        assert_eq!(slot.booking_status(Some(1)), BookingStatus::Confirmed);
+        assert_eq!(slot.booking_status(Some(2)), BookingStatus::Waiting(1));
+        assert_eq!(slot.booking_status(Some(3)), BookingStatus::Full);
         assert!(!slot.can_accept_signup());
         assert!(!slot.can_promote_from_waitlist());
         slot.max_players = 2;
         assert!(slot.can_accept_signup());
         assert!(slot.can_promote_from_waitlist());
-        assert_eq!(slot.booking_status(&Some(3)), "Not booked");
+        assert_eq!(slot.booking_status(Some(3)), BookingStatus::Open);
     }
 
     #[test]
     fn dates_use_local_time_and_iso_week_year() {
         assert_eq!(
-            slot("2030-03-25T19:00:00Z").datetime_label_de(),
-            "Mo, 25.03.30 · 20:00"
+            Locale::De.game_time(&slot("2030-03-25T19:00:00Z")),
+            "Mo., 25.03.2030 · 20:00 Uhr"
         );
         assert_eq!(
-            slot("2030-04-01T18:00:00Z").datetime_label_de(),
-            "Mo, 01.04.30 · 20:00"
+            Locale::De.game_time(&slot("2030-04-01T18:00:00Z")),
+            "Mo., 01.04.2030 · 20:00 Uhr"
         );
         let weeks = group_slots(vec![
             slot("2029-12-30T19:00:00Z"),

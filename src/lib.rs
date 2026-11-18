@@ -3,6 +3,7 @@ mod admin_schedule;
 mod clock;
 pub mod db;
 pub mod error;
+mod i18n;
 mod identity;
 pub mod models;
 mod push;
@@ -15,6 +16,7 @@ use crate::{
         admin_move_waiter, cancel_booking_checked, cancel_booking_for_slot, create_upcoming_slots,
         find_slot, list_slots, list_users, promote_waitlist_checked,
     },
+    i18n::Language,
     identity::{AdminIdentity, BookingIdentity, cookie_value, current_user_from_headers},
     models::{Slot, SlotWeek, UserIdentity, group_slots},
 };
@@ -29,7 +31,7 @@ use axum::{
 };
 use chrono::{NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Europe::Berlin;
-use error::AppError;
+use error::{AppError, Problem};
 use serde::Deserialize;
 use sqlx::SqlitePool;
 use std::{path::Path as FsPath, time::Duration};
@@ -39,6 +41,7 @@ use tower_http::trace::TraceLayer;
 #[derive(Template)]
 #[template(path = "slots.html")]
 struct SlotsTemplate {
+    lang: Language,
     user_selector_html: String,
     identity_refresh_html: String,
     title: String,
@@ -54,6 +57,7 @@ struct SlotsTemplate {
 #[derive(Template)]
 #[template(path = "welcome.html")]
 struct WelcomeTemplate {
+    lang: Language,
     title: String,
     user_selector_html: String,
 }
@@ -61,6 +65,7 @@ struct WelcomeTemplate {
 #[derive(Template)]
 #[template(path = "slots_content.html")]
 struct SlotsContentTemplate {
+    lang: Language,
     identity_refresh_html: String,
     current_user_id: Option<i64>,
     current_user_is_admin: bool,
@@ -74,6 +79,7 @@ struct SlotsContentTemplate {
 #[derive(Template)]
 #[template(path = "slot_card.html")]
 struct SlotCardTemplate {
+    lang: Language,
     slot: Slot,
     current_user_id: Option<i64>,
     current_user_is_admin: bool,
@@ -103,7 +109,8 @@ struct RevisionForm {
 #[derive(Template)]
 #[template(path = "admin_slot_edit.html")]
 struct GameEditTemplate {
-    title: String,
+    lang: Language,
+    title: &'static str,
     slot: Slot,
     user_id: i64,
 }
@@ -127,9 +134,7 @@ fn validate_map_url(value: Option<&str>) -> Result<Option<String>, AppError> {
                 matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
             }))
     {
-        return Err(AppError::BadRequest(
-            "Enter a valid HTTP or HTTPS maps link.".into(),
-        ));
+        return Err(AppError::BadRequest(Problem::BadMapLink));
     }
     Ok(Some(value.into()))
 }
@@ -149,6 +154,7 @@ impl ViewQuery {
 #[derive(Template)]
 #[template(path = "user_selector.html")]
 struct UserSelectorTemplate {
+    lang: Language,
     out_of_band: bool,
     users: Vec<UserIdentity>,
     selected_user_id: Option<i64>,
@@ -164,7 +170,8 @@ struct UserSelectionForm {
 #[derive(Template)]
 #[template(path = "admin_login.html")]
 struct AdminLoginTemplate {
-    title: String,
+    lang: Language,
+    title: &'static str,
     error: String,
     user_id: i64,
     user_name: String,
@@ -224,6 +231,10 @@ fn app_with_push_config(pool: SqlitePool, push_config: push::Config) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/slots", get(index))
+        .route(
+            "/language",
+            post(i18n::change_language).layer(DefaultBodyLimit::max(8192)),
+        )
         .route("/slots/fragment", get(slots_fragment))
         .route("/admin/login", get(admin_login_page).post(admin_login))
         .route("/admin/logout", post(admin_logout))
@@ -307,6 +318,7 @@ fn app_with_push_config(pool: SqlitePool, push_config: push::Config) -> Router {
             rate_limit::RateLimits::default(),
             rate_limit::limit_writes,
         ))
+        .layer(axum::middleware::from_fn(error::localize_response))
         .layer(axum::middleware::map_response(
             |mut response: Response| async move {
                 response
@@ -320,19 +332,21 @@ fn app_with_push_config(pool: SqlitePool, push_config: push::Config) -> Router {
 
 async fn admin_edit_game_page(
     State(pool): State<SqlitePool>,
+    lang: Language,
     Path(slot_id): Path<i64>,
     headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
     let user = current_user_from_headers(&pool, &headers)
         .await?
         .filter(|user| user.is_admin)
-        .ok_or_else(|| AppError::Forbidden("admin access required".into()))?;
+        .ok_or(AppError::Forbidden(Problem::AdminRequired))?;
     let slot = find_slot(&pool, slot_id)
         .await?
-        .ok_or_else(|| AppError::BadRequest("Game does not exist.".into()))?;
+        .ok_or(AppError::BadRequest(Problem::GameMissing))?;
     Ok(Html(
         GameEditTemplate {
-            title: "Edit game".into(),
+            title: lang.text.edit_game,
+            lang,
             slot,
             user_id: user.id,
         }
@@ -350,30 +364,22 @@ async fn admin_edit_game(
     let _ = current_user;
     let local =
         NaiveDateTime::parse_from_str(&format!("{} {}", form.date, form.time), "%Y-%m-%d %H:%M")
-            .map_err(|_| AppError::BadRequest("Enter a valid date and time.".into()))?;
+            .map_err(|_| AppError::BadRequest(Problem::BadGameTime))?;
     let datetime = Berlin
         .from_local_datetime(&local)
         .single()
-        .ok_or_else(|| {
-            AppError::BadRequest(
-                "This Berlin time is missing or ambiguous because of daylight saving.".into(),
-            )
-        })?
+        .ok_or(AppError::BadRequest(Problem::AmbiguousGameTime))?
         .with_timezone(&Utc);
     let venue = form.venue.trim();
     if venue.is_empty() || venue.chars().count() > 120 {
-        return Err(AppError::BadRequest(
-            "Enter a location with 1 to 120 characters.".into(),
-        ));
+        return Err(AppError::BadRequest(Problem::BadVenue));
     }
     let clear_bookings = match form.bookings.as_deref() {
         None => None,
         Some("keep") => Some(false),
         Some("clear") => Some(true),
         Some(_) => {
-            return Err(AppError::BadRequest(
-                "Choose whether to keep or clear bookings.".into(),
-            ));
+            return Err(AppError::BadRequest(Problem::ChooseBookingAction));
         }
     };
     db::edit_game(
@@ -393,6 +399,7 @@ async fn admin_edit_game(
 
 async fn index(
     State(pool): State<SqlitePool>,
+    lang: Language,
     Extension(push_config): Extension<push::Config>,
     Query(view): Query<ViewQuery>,
     headers: HeaderMap,
@@ -401,14 +408,17 @@ async fn index(
     if current_user.is_none() {
         let welcome = WelcomeTemplate {
             title: "Hoopline".into(),
-            user_selector_html: render_user_selector(&pool, None, false).await?,
+            user_selector_html: render_user_selector(&pool, None, false, lang.clone()).await?,
+            lang,
         };
         return Ok(Html(welcome.render()?).into_response());
     }
     let current_user_id = current_user.as_ref().map(|user| user.id);
     let current_user_is_admin = current_user.as_ref().is_some_and(|user| user.is_admin);
     let template = SlotsTemplate {
-        user_selector_html: render_user_selector(&pool, current_user.as_ref(), false).await?,
+        user_selector_html: render_user_selector(&pool, current_user.as_ref(), false, lang.clone())
+            .await?,
+        lang,
         identity_refresh_html: String::new(),
         title: "Hoopline".to_string(),
         current_user_id,
@@ -434,6 +444,7 @@ async fn index(
 
 async fn slots_fragment(
     State(pool): State<SqlitePool>,
+    lang: Language,
     Extension(push_config): Extension<push::Config>,
     Query(view): Query<ViewQuery>,
     headers: HeaderMap,
@@ -445,7 +456,14 @@ async fn slots_fragment(
     let current_user_id = current_user.as_ref().map(|user| user.id);
     let current_user_is_admin = current_user.as_ref().is_some_and(|user| user.is_admin);
     let template = SlotsContentTemplate {
-        identity_refresh_html: render_user_selector(&pool, current_user.as_ref(), true).await?,
+        identity_refresh_html: render_user_selector(
+            &pool,
+            current_user.as_ref(),
+            true,
+            lang.clone(),
+        )
+        .await?,
+        lang,
         current_user_id,
         current_user_is_admin,
         admin_mode: view.admin_mode(current_user_is_admin),
@@ -469,7 +487,7 @@ async fn signup_slot(
     Path(slot_id): Path<i64>,
     Query(view): Query<ViewQuery>,
     current_user: BookingIdentity,
-    headers: HeaderMap,
+    (lang, headers): (Language, HeaderMap),
     body: Bytes,
 ) -> Result<Html<String>, AppError> {
     let mut subscription = None;
@@ -491,7 +509,11 @@ async fn signup_slot(
         if setup_failed || push::check_origin(&headers, &push_config).is_err() {
             return None;
         }
-        push::Binding::parse(cookie_value(&headers, "push_device")?, subscription)
+        push::Binding::parse(
+            cookie_value(&headers, "push_device")?,
+            subscription,
+            lang.locale,
+        )
     });
     if subscription.is_some() && binding.is_none() {
         setup_failed = true;
@@ -501,43 +523,37 @@ async fn signup_slot(
     match outcome {
         SignupOutcome::AddedPlayer | SignupOutcome::AddedWaitlist => {}
         SignupOutcome::AlreadySignedUp => {
-            return Err(AppError::BadRequest(
-                "you are already signed up for this slot".to_string(),
-            ));
+            return Err(AppError::BadRequest(Problem::AlreadySignedUp));
         }
         SignupOutcome::Full => {
-            return Err(AppError::BadRequest(
-                "slot and waitlist are already full".to_string(),
-            ));
+            return Err(AppError::BadRequest(Problem::ListsFull));
         }
         SignupOutcome::SlotNotFound => {
-            return Err(AppError::BadRequest("slot does not exist".to_string()));
+            return Err(AppError::BadRequest(Problem::SlotMissing));
         }
         SignupOutcome::Started => {
-            return Err(AppError::BadRequest(
-                "This slot has started. Refresh to see upcoming slots.".into(),
-            ));
+            return Err(AppError::BadRequest(Problem::SlotStarted));
         }
     }
 
     let slot = find_slot(&pool, slot_id)
         .await?
-        .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
+        .ok_or(AppError::BadRequest(Problem::SlotMissing))?;
     let alerts_feedback = if outcome == SignupOutcome::AddedWaitlist
         && (setup_failed || registration == Some(push::BindOutcome::Unavailable))
     {
-        " Alerts could not be enabled. Check your booking here."
+        lang.text.alert_failed_booking
     } else if registration == Some(push::BindOutcome::Registered) {
-        " Promotion alerts are on for this device."
+        lang.text.alert_on
     } else {
         ""
     };
     let template = SlotCardTemplate {
-        feedback: format!(
-            "Booking saved. {}.{}",
-            slot.booking_status(&Some(current_user.id())),
-            alerts_feedback
+        feedback: lang.locale.booking_saved(
+            &lang.locale.booking_status(&slot, Some(&current_user.id())),
+            alerts_feedback,
         ),
+        lang,
         slot,
         current_user_id: Some(current_user.id()),
         current_user_is_admin: current_user.is_admin(),
@@ -553,6 +569,7 @@ async fn signup_slot(
 
 async fn cancel_slot(
     State(pool): State<SqlitePool>,
+    lang: Language,
     Path(slot_id): Path<i64>,
     Query(view): Query<ViewQuery>,
     current_user: BookingIdentity,
@@ -560,21 +577,20 @@ async fn cancel_slot(
     match cancel_booking_for_slot(&pool, slot_id, current_user.id()).await? {
         CancelOutcome::Cancelled => {}
         CancelOutcome::NotSignedUp => {
-            return Err(AppError::BadRequest(
-                "you are not signed up for this slot".to_string(),
-            ));
+            return Err(AppError::BadRequest(Problem::NotSignedUp));
         }
         CancelOutcome::SlotNotFound => {
-            return Err(AppError::BadRequest("slot does not exist".to_string()));
+            return Err(AppError::BadRequest(Problem::SlotMissing));
         }
         CancelOutcome::Stale => return Err(AppError::StaleSlot),
     }
 
     let slot = find_slot(&pool, slot_id)
         .await?
-        .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
+        .ok_or(AppError::BadRequest(Problem::SlotMissing))?;
     let template = SlotCardTemplate {
-        feedback: "Booking cancelled. You are no longer on this list.".into(),
+        feedback: lang.text.booking_cancelled.into(),
+        lang,
         slot,
         current_user_id: Some(current_user.id()),
         current_user_is_admin: current_user.is_admin(),
@@ -590,6 +606,7 @@ async fn cancel_slot(
 
 async fn admin_remove_slot_user(
     State(pool): State<SqlitePool>,
+    lang: Language,
     Path((slot_id, user_id)): Path<(i64, i64)>,
     current_user: AdminIdentity,
     Form(form): Form<RevisionForm>,
@@ -597,21 +614,20 @@ async fn admin_remove_slot_user(
     match cancel_booking_checked(&pool, slot_id, user_id, Some(form.revision)).await? {
         CancelOutcome::Cancelled => {}
         CancelOutcome::NotSignedUp => {
-            return Err(AppError::BadRequest(
-                "target user is not signed up for this slot".to_string(),
-            ));
+            return Err(AppError::BadRequest(Problem::MemberNotSignedUp));
         }
         CancelOutcome::SlotNotFound => {
-            return Err(AppError::BadRequest("slot does not exist".to_string()));
+            return Err(AppError::BadRequest(Problem::SlotMissing));
         }
         CancelOutcome::Stale => return Err(AppError::StaleSlot),
     }
 
     let slot = find_slot(&pool, slot_id)
         .await?
-        .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
+        .ok_or(AppError::BadRequest(Problem::SlotMissing))?;
     let template = SlotCardTemplate {
-        feedback: "Player removed. The waitlist has been updated.".into(),
+        feedback: lang.text.player_removed.into(),
+        lang,
         slot,
         current_user_id: Some(current_user.id()),
         current_user_is_admin: true,
@@ -623,6 +639,7 @@ async fn admin_remove_slot_user(
 
 async fn admin_promote_waitlist_user(
     State(pool): State<SqlitePool>,
+    lang: Language,
     Path((slot_id, user_id)): Path<(i64, i64)>,
     current_user: AdminIdentity,
     Form(form): Form<RevisionForm>,
@@ -630,26 +647,23 @@ async fn admin_promote_waitlist_user(
     match promote_waitlist_checked(&pool, slot_id, user_id, Some(form.revision)).await? {
         PromoteOutcome::Promoted => {}
         PromoteOutcome::NotWaitlisted => {
-            return Err(AppError::BadRequest(
-                "target user is not on this waitlist".to_string(),
-            ));
+            return Err(AppError::BadRequest(Problem::TargetNotWaiting));
         }
         PromoteOutcome::PlayerListFull => {
-            return Err(AppError::BadRequest(
-                "player list is full; remove a player first".to_string(),
-            ));
+            return Err(AppError::BadRequest(Problem::PlayersFull));
         }
         PromoteOutcome::SlotNotFound => {
-            return Err(AppError::BadRequest("slot does not exist".to_string()));
+            return Err(AppError::BadRequest(Problem::SlotMissing));
         }
         PromoteOutcome::Stale => return Err(AppError::StaleSlot),
     }
 
     let slot = find_slot(&pool, slot_id)
         .await?
-        .ok_or_else(|| AppError::BadRequest("slot does not exist".to_string()))?;
+        .ok_or(AppError::BadRequest(Problem::SlotMissing))?;
     let template = SlotCardTemplate {
-        feedback: "Waitlist player promoted.".into(),
+        feedback: lang.text.waitlist_promoted.into(),
+        lang,
         slot,
         current_user_id: Some(current_user.id()),
         current_user_is_admin: true,
@@ -661,6 +675,7 @@ async fn admin_promote_waitlist_user(
 
 async fn admin_generate_slots(
     State(pool): State<SqlitePool>,
+    lang: Language,
     current_user: AdminIdentity,
 ) -> Result<Html<String>, AppError> {
     let report = db::create_upcoming_slots_report(&pool, clock::now()).await?;
@@ -669,11 +684,16 @@ async fn admin_generate_slots(
         current_user_id: Some(current_user.id()),
         current_user_is_admin: true,
         admin_mode: true,
-        generation_feedback: format!(
-            "Created {} games. {}",
-            report.created,
-            report.warnings.join(" ")
-        ),
+        generation_feedback: std::iter::once(lang.locale.games_created(report.created))
+            .chain(
+                report
+                    .warnings
+                    .iter()
+                    .map(|warning| warning.message(lang.locale)),
+            )
+            .collect::<Vec<_>>()
+            .join(" "),
+        lang,
         push_state: "unavailable",
         users: list_users(&pool).await?,
         weeks: group_slots(list_slots(&pool).await?),
@@ -683,35 +703,41 @@ async fn admin_generate_slots(
 
 async fn admin_add_slot_user(
     State(pool): State<SqlitePool>,
+    lang: Language,
     Path(slot_id): Path<i64>,
     current_user: AdminIdentity,
     Form(form): Form<AdminAddForm>,
 ) -> Result<Html<String>, AppError> {
     admin_add_member(&pool, slot_id, form.user_id, form.revision, form.list).await?;
-    render_admin_card(&pool, slot_id, current_user.id(), "Member added.").await
+    let feedback = lang.text.member_added;
+    render_admin_card(&pool, slot_id, current_user.id(), lang, feedback).await
 }
 
 async fn admin_move_slot_user(
     State(pool): State<SqlitePool>,
+    lang: Language,
     Path((slot_id, user_id)): Path<(i64, i64)>,
     current_user: AdminIdentity,
     Form(form): Form<AdminMoveForm>,
 ) -> Result<Html<String>, AppError> {
     admin_move_waiter(&pool, slot_id, user_id, form.revision, form.direction).await?;
-    render_admin_card(&pool, slot_id, current_user.id(), "Waitlist updated.").await
+    let feedback = lang.text.waitlist_updated;
+    render_admin_card(&pool, slot_id, current_user.id(), lang, feedback).await
 }
 
 async fn render_admin_card(
     pool: &SqlitePool,
     slot_id: i64,
     user_id: i64,
+    lang: Language,
     feedback: &str,
 ) -> Result<Html<String>, AppError> {
     let slot = find_slot(pool, slot_id)
         .await?
-        .ok_or_else(|| AppError::BadRequest("Game does not exist.".into()))?;
+        .ok_or(AppError::BadRequest(Problem::GameMissing))?;
     Ok(Html(
         SlotCardTemplate {
+            lang,
             slot,
             current_user_id: Some(user_id),
             current_user_is_admin: true,
@@ -725,11 +751,12 @@ async fn render_admin_card(
 
 async fn users_fragment(
     State(pool): State<SqlitePool>,
+    lang: Language,
     headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
     let current_user = current_user_from_headers(&pool, &headers).await?;
     Ok(Html(
-        render_user_selector(&pool, current_user.as_ref(), false).await?,
+        render_user_selector(&pool, current_user.as_ref(), false, lang).await?,
     ))
 }
 
@@ -737,8 +764,10 @@ async fn render_user_selector(
     pool: &SqlitePool,
     user: Option<&UserIdentity>,
     out_of_band: bool,
+    lang: Language,
 ) -> Result<String, AppError> {
     let template = UserSelectorTemplate {
+        lang,
         out_of_band,
         users: if user.is_none() {
             list_users(pool).await?
@@ -746,16 +775,13 @@ async fn render_user_selector(
             Vec::new()
         },
         selected_user_id: user.map(|user| user.id),
-        current_user_label: user.map_or_else(
-            || "Select your name".into(),
-            |user| {
-                if user.is_admin {
-                    format!("{} | Admin", user.name)
-                } else {
-                    user.name.clone()
-                }
-            },
-        ),
+        current_user_label: user.map_or_else(String::new, |user| {
+            if user.is_admin {
+                format!("{} | Admin", user.name)
+            } else {
+                user.name.clone()
+            }
+        }),
     };
     Ok(template.render()?)
 }
@@ -772,13 +798,11 @@ async fn select_user(
             .bind(selected_user_id)
             .fetch_optional(&mut *tx)
             .await?
-            .ok_or_else(|| AppError::BadRequest("selected user does not exist".to_string()))?
+            .ok_or(AppError::BadRequest(Problem::SelectedMemberMissing))?
     } else if let Some(new_user_name) = form.new_user_name {
         let trimmed_name = new_user_name.trim();
         if trimmed_name.is_empty() || trimmed_name.chars().count() > 64 {
-            return Err(AppError::BadRequest(
-                "Enter a name with 1 to 64 characters.".to_string(),
-            ));
+            return Err(AppError::BadRequest(Problem::BadName));
         }
         let exists: bool =
             sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE name = ? COLLATE NOCASE)")
@@ -786,18 +810,14 @@ async fn select_user(
                 .fetch_one(&mut *tx)
                 .await?;
         if exists {
-            return Err(AppError::BadRequest(
-                "This name already exists. Choose your name from the list.".into(),
-            ));
+            return Err(AppError::BadRequest(Problem::DuplicateName));
         }
         sqlx::query_scalar("INSERT INTO users (name, is_admin) VALUES (?, 0) RETURNING id")
             .bind(trimmed_name)
             .fetch_one(&mut *tx)
             .await?
     } else {
-        return Err(AppError::BadRequest(
-            "Choose your name from the list. If it is missing, use Add a new member.".to_string(),
-        ));
+        return Err(AppError::BadRequest(Problem::ChooseMember));
     };
 
     if let Some(token) = cookie_value(&headers, "admin_session") {
@@ -822,19 +842,12 @@ async fn select_user(
     Ok(response)
 }
 
-fn identity_redirect(headers: &HeaderMap, destination: &'static str) -> Response {
+fn identity_redirect(headers: &HeaderMap, destination: &str) -> Response {
     if headers
         .get("hx-request")
         .is_some_and(|value| value == "true")
     {
-        (
-            [(
-                HeaderName::from_static("hx-redirect"),
-                HeaderValue::from_static(destination),
-            )],
-            "",
-        )
-            .into_response()
+        ([(HeaderName::from_static("hx-redirect"), destination)], "").into_response()
     } else {
         Redirect::to(destination).into_response()
     }
@@ -869,18 +882,24 @@ async fn logout(
 
 async fn admin_login_page(
     State(pool): State<SqlitePool>,
+    lang: Language,
     headers: HeaderMap,
 ) -> Result<Html<String>, AppError> {
     let user = current_user_from_headers(&pool, &headers)
         .await?
         .ok_or(AppError::IdentityChanged)?;
-    admin_login_form(&user, "")
+    admin_login_form(&user, lang, "")
 }
 
-fn admin_login_form(user: &UserIdentity, error: &str) -> Result<Html<String>, AppError> {
+fn admin_login_form(
+    user: &UserIdentity,
+    lang: Language,
+    error: &str,
+) -> Result<Html<String>, AppError> {
     Ok(Html(
         AdminLoginTemplate {
-            title: "Admin login".into(),
+            title: lang.text.admin_login,
+            lang,
             error: error.into(),
             user_id: user.id,
             user_name: user.name.clone(),
@@ -891,6 +910,7 @@ fn admin_login_form(user: &UserIdentity, error: &str) -> Result<Html<String>, Ap
 
 async fn admin_login(
     State(pool): State<SqlitePool>,
+    lang: Language,
     headers: HeaderMap,
     Form(form): Form<AdminLoginForm>,
 ) -> Result<Response, AppError> {
@@ -903,7 +923,7 @@ async fn admin_login(
     let password = std::env::var("ADMIN_PASSWORD")
         .ok()
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| AppError::Forbidden("Admin login is not configured.".into()))?;
+        .ok_or(AppError::Forbidden(Problem::AdminNotConfigured))?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let now = clock::now().timestamp();
     sqlx::query("DELETE FROM admin_login_failures WHERE attempted_at <= ? - 900")
@@ -917,11 +937,8 @@ async fn admin_login(
             .await?;
     if failures >= 5 {
         tx.commit().await?;
-        return Ok(admin_login_form(
-            &user,
-            "Too many attempts for this member. Try again in 15 minutes.",
-        )?
-        .into_response());
+        let message = lang.text.too_many_attempts;
+        return Ok(admin_login_form(&user, lang, message)?.into_response());
     }
     if !bool::from(password.as_bytes().ct_eq(form.password.as_bytes())) {
         sqlx::query("INSERT INTO admin_login_failures VALUES (?, ?)")
@@ -930,7 +947,8 @@ async fn admin_login(
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
-        return Ok(admin_login_form(&user, "Incorrect password.")?.into_response());
+        let message = lang.text.wrong_password;
+        return Ok(admin_login_form(&user, lang, message)?.into_response());
     }
     sqlx::query("DELETE FROM admin_login_failures WHERE user_id = ?")
         .bind(user.id)
@@ -986,11 +1004,7 @@ async fn admin_logout(
 }
 
 fn admin_cookie(value: &str, max_age: u32) -> Result<HeaderValue, AppError> {
-    let secure = if std::env::var("COOKIE_SECURE").as_deref() == Ok("true") {
-        "; Secure"
-    } else {
-        ""
-    };
+    let secure = if secure_cookies() { "; Secure" } else { "" };
     Ok(HeaderValue::from_str(&format!(
         "admin_session={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax{secure}"
     ))?)
@@ -1128,12 +1142,12 @@ fn user_cookie_header_value(user_id: i64) -> Result<HeaderValue, AppError> {
 }
 
 fn identity_cookie(value: &str, max_age: u32) -> Result<HeaderValue, AppError> {
-    let secure = if std::env::var("COOKIE_SECURE").is_ok_and(|value| value == "true") {
-        "; Secure"
-    } else {
-        ""
-    };
+    let secure = if secure_cookies() { "; Secure" } else { "" };
     let value =
         format!("user_id={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax{secure}");
     Ok(HeaderValue::from_str(&value)?)
+}
+
+fn secure_cookies() -> bool {
+    std::env::var("COOKIE_SECURE").as_deref() == Ok("true")
 }

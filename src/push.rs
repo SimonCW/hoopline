@@ -15,8 +15,9 @@ use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::{
-    error::AppError,
-    identity::{BookingIdentity, cookie_value, current_user_from_headers},
+    error::{AppError, Problem},
+    i18n::{Language, Locale},
+    identity::{BookingIdentity, cookie_value, current_user_from_headers, user_id_from_cookie},
 };
 
 const MAX_DEVICES_PER_MEMBER: i64 = 5;
@@ -159,7 +160,7 @@ fn owned_token(headers: &HeaderMap) -> Result<[u8; 32], AppError> {
     cookie_value(headers, "push_device")
         .and_then(device_token)
         .map(|(_, hash, _)| hash)
-        .ok_or_else(|| AppError::Forbidden("Device ownership is required.".into()))
+        .ok_or(AppError::Forbidden(Problem::DeviceRequired))
 }
 
 pub(crate) async fn detach(
@@ -210,18 +211,37 @@ pub(crate) async fn detach(
     ))
 }
 
+pub(crate) async fn update_language(
+    pool: &SqlitePool,
+    headers: &HeaderMap,
+    locale: Locale,
+) -> Result<(), sqlx::Error> {
+    if let Some((_, hash, revision)) = cookie_value(headers, "push_device").and_then(device_token)
+        && let Some(user_id) = user_id_from_cookie(headers)
+    {
+        sqlx::query("UPDATE push_devices SET locale = ? WHERE token_hash = ? AND user_id = ? AND identity_revision = ?")
+            .bind(locale.code())
+            .bind(hash.as_slice())
+            .bind(user_id)
+            .bind(revision)
+            .execute(pool)
+            .await?;
+    }
+    Ok(())
+}
+
 pub(crate) fn check_origin(headers: &HeaderMap, config: &Config) -> Result<(), AppError> {
     let origin = config
         .origin
         .as_deref()
-        .ok_or_else(|| AppError::Forbidden("Promotion alerts are unavailable.".into()))?;
+        .ok_or(AppError::Forbidden(Problem::AlertsUnavailable))?;
     if headers.get_all(header::ORIGIN).iter().count() != 1
         || headers
             .get(header::ORIGIN)
             .and_then(|value| value.to_str().ok())
             != Some(origin)
     {
-        return Err(AppError::Forbidden("Invalid request origin.".into()));
+        return Err(AppError::Forbidden(Problem::BadOrigin));
     }
     Ok(())
 }
@@ -289,6 +309,7 @@ pub(crate) struct SubscribeQuery {
 
 pub(crate) async fn subscribe(
     State(pool): State<SqlitePool>,
+    lang: Language,
     Extension(config): Extension<Config>,
     Query(query): Query<SubscribeQuery>,
     user: BookingIdentity,
@@ -297,18 +318,16 @@ pub(crate) async fn subscribe(
 ) -> Result<Json<Status>, AppError> {
     check_origin(&headers, &config)?;
     let token = cookie_value(&headers, "push_device")
-        .ok_or_else(|| AppError::Forbidden("Device ownership is required.".into()))?;
-    let body = std::str::from_utf8(&body)
-        .map_err(|_| AppError::BadRequest("Invalid subscription.".into()))?;
-    let binding = Binding::parse(token, body)
-        .ok_or_else(|| AppError::BadRequest("Invalid subscription.".into()))?;
+        .ok_or(AppError::Forbidden(Problem::DeviceRequired))?;
+    let body =
+        std::str::from_utf8(&body).map_err(|_| AppError::BadRequest(Problem::BadSubscription))?;
+    let binding = Binding::parse(token, body, lang.locale)
+        .ok_or(AppError::BadRequest(Problem::BadSubscription))?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     if bind_with_preference(&mut tx, user.id(), &binding, !query.automatic).await?
         != BindOutcome::Registered
     {
-        return Err(AppError::BadRequest(
-            "Alerts could not be enabled on this device.".into(),
-        ));
+        return Err(AppError::BadRequest(Problem::AlertsFailed));
     }
     tx.commit().await?;
     Ok(Json(Status {
@@ -328,9 +347,7 @@ pub(crate) async fn disable(
     let now = crate::clock::now().timestamp();
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     if !device_capacity_available(&mut tx, &hash).await? {
-        return Err(AppError::BadRequest(
-            "Device storage is full. Try again later.".into(),
-        ));
+        return Err(AppError::BadRequest(Problem::DeviceStorageFull));
     }
     sqlx::query(
         "INSERT INTO push_devices (token_hash, enabled, created_at, updated_at)
@@ -378,8 +395,7 @@ pub(crate) async fn send_test(
     .bind(user.id())
     .fetch_optional(&mut *tx)
     .await?;
-    let (device_id, generation) =
-        device.ok_or_else(|| AppError::BadRequest("Enable alerts on this device first.".into()))?;
+    let (device_id, generation) = device.ok_or(AppError::BadRequest(Problem::EnableAlertsFirst))?;
     let (minute, hour): (i64, i64) = sqlx::query_as(
         "SELECT count(*) FILTER (WHERE created_at > ? - 60), count(*)
          FROM push_jobs WHERE kind = 'test' AND device_id = ? AND created_at > ? - 3600",
@@ -426,6 +442,7 @@ struct Subscription {
 
 /// A validated browser subscription and the hash of its ownership token.
 pub(crate) struct Binding {
+    locale: Locale,
     token_hash: [u8; 32],
     identity_revision: i64,
     endpoint: String,
@@ -435,7 +452,7 @@ pub(crate) struct Binding {
 
 impl Binding {
     // The token is issued by the server and must be stored in an HttpOnly cookie.
-    pub(crate) fn parse(token: &str, json: &str) -> Option<Self> {
+    pub(crate) fn parse(token: &str, json: &str, locale: Locale) -> Option<Self> {
         if json.len() > 4096 {
             return None;
         }
@@ -457,6 +474,7 @@ impl Binding {
             return None;
         }
         Some(Self {
+            locale,
             token_hash,
             identity_revision,
             endpoint: subscription.endpoint,
@@ -577,14 +595,17 @@ async fn bind_with_preference(
             .execute(&mut **tx)
             .await?;
         }
+        // A delayed enrollment must not undo a more recent language switch.
         sqlx::query(
-            "UPDATE push_devices SET user_id = ?, endpoint = ?, p256dh = ?, auth = ?, enabled = 1,
-             generation = generation + ?, updated_at = ? WHERE id = ?",
+            "UPDATE push_devices SET user_id = ?1, endpoint = ?2, p256dh = ?3, auth = ?4, enabled = 1,
+             locale = CASE WHEN user_id = ?1 THEN COALESCE(locale, ?5) ELSE ?5 END,
+             generation = generation + ?6, updated_at = ?7 WHERE id = ?8",
         )
         .bind(member_id)
         .bind(&binding.endpoint)
         .bind(&binding.p256dh)
         .bind(&binding.auth)
+        .bind(binding.locale.code())
         .bind(i64::from(changed))
         .bind(now)
         .bind(id)
@@ -592,14 +613,15 @@ async fn bind_with_preference(
         .await?;
     } else {
         sqlx::query(
-            "INSERT INTO push_devices (token_hash, user_id, endpoint, p256dh, auth, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO push_devices (token_hash, user_id, endpoint, p256dh, auth, locale, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(binding.token_hash.as_slice())
         .bind(member_id)
         .bind(&binding.endpoint)
         .bind(&binding.p256dh)
         .bind(&binding.auth)
+        .bind(binding.locale.code())
         .bind(now)
         .bind(now)
         .execute(&mut **tx)
@@ -640,7 +662,7 @@ mod tests {
     }
 
     fn binding(byte: u8, endpoint: &str) -> Binding {
-        Binding::parse(&token(byte), &subscription(endpoint)).unwrap()
+        Binding::parse(&token(byte), &subscription(endpoint), super::Locale::En).unwrap()
     }
 
     async fn fixture() -> sqlx::SqlitePool {
@@ -855,6 +877,81 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(binding, (2, 1));
+    }
+
+    #[tokio::test]
+    async fn device_language_follows_owned_preference_without_resetting_jobs() {
+        let pool = fixture().await;
+        let app = router(pool.clone());
+        let cookie = format!("user_id=2; push_device={}; hoopline_lang=de", token(1));
+        let subscription = subscription("https://fcm.googleapis.com/first");
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("push_subscription", &subscription)
+            .finish();
+        let response = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/slots/1/signup",
+                &cookie,
+                "https://hoopline.example",
+                &body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let html = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(String::from_utf8_lossy(&html).contains("Warteliste: Platz 1"));
+        let original: (String, i64) = sqlx::query_as("SELECT locale, generation FROM push_devices")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(original.0, "de");
+
+        sqlx::query("UPDATE push_devices SET identity_revision = 2")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for (user, revision, expected) in [(3, 2, "de"), (2, 1, "de"), (2, 2, "en")] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post("/language")
+                        .header(
+                            header::COOKIE,
+                            format!("user_id={user}; push_device={}.{revision}", token(1)),
+                        )
+                        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                        .body(Body::from("locale=en&return_to=%2Fslots"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::SEE_OTHER);
+            let actual: (String, i64) =
+                sqlx::query_as("SELECT locale, generation FROM push_devices")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(actual, (expected.to_owned(), original.1));
+        }
+
+        let response = app
+            .oneshot(request(
+                "POST",
+                "/push/subscribe?automatic=true",
+                &format!("user_id=2; push_device={}.2; hoopline_lang=de", token(1)),
+                "https://hoopline.example",
+                &subscription,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let actual: (String, i64) = sqlx::query_as("SELECT locale, generation FROM push_devices")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(actual, ("en".to_owned(), original.1));
     }
 
     #[tokio::test]
@@ -1089,7 +1186,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(stale.status(), StatusCode::BAD_REQUEST);
-        let old_binding = Binding::parse(&token(1), &body).unwrap();
+        let old_binding = Binding::parse(&token(1), &body, super::Locale::En).unwrap();
         assert_eq!(
             signup_with_push(&pool, 1, 2, Some(&old_binding))
                 .await
@@ -1142,7 +1239,9 @@ mod tests {
             "https://web.push.apple.com/abc",
             "https://1.push.apple.com/abc",
         ] {
-            assert!(Binding::parse(&token(1), &subscription(endpoint)).is_some());
+            assert!(
+                Binding::parse(&token(1), &subscription(endpoint), super::Locale::En).is_some()
+            );
         }
         for endpoint in [
             "http://fcm.googleapis.com/path",
@@ -1156,17 +1255,17 @@ mod tests {
             "https://localhost/path",
         ] {
             assert!(
-                Binding::parse(&token(1), &subscription(endpoint)).is_none(),
+                Binding::parse(&token(1), &subscription(endpoint), super::Locale::En).is_none(),
                 "{endpoint}"
             );
         }
         let mut invalid: serde_json::Value =
             serde_json::from_str(&subscription("https://fcm.googleapis.com/path")).unwrap();
         invalid["keys"]["p256dh"] = json!(URL_SAFE_NO_PAD.encode([4; 65]));
-        assert!(Binding::parse(&token(1), &invalid.to_string()).is_none());
+        assert!(Binding::parse(&token(1), &invalid.to_string(), super::Locale::En).is_none());
         invalid["keys"]["auth"] = json!("short");
-        assert!(Binding::parse("bad", &invalid.to_string()).is_none());
-        assert!(Binding::parse(&token(1), &"x".repeat(4097)).is_none());
+        assert!(Binding::parse("bad", &invalid.to_string(), super::Locale::En).is_none());
+        assert!(Binding::parse(&token(1), &"x".repeat(4097), super::Locale::En).is_none());
     }
 
     #[tokio::test]

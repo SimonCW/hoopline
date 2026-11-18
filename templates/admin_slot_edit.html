@@ -1,26 +1,26 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="card admin-editor" aria-labelledby="edit-title">
-    <h1 id="edit-title">Edit this game</h1>
-    <p>Times use Europe/Berlin. This changes one game only.</p>
-    <p>{{ slot.players.len() }} players · {{ slot.waitlist.len() }} waiting</p>
+    <h1 id="edit-title">{{ lang.text.edit_game }}</h1>
+    <p>{{ lang.text.edit_game_help }}</p>
+    <p>{{ lang.locale.roster_summary(slot) }}</p>
     <p class="request-error" role="alert" tabindex="-1" hidden></p>
-    <form class="identity-form" hx-post="/admin/slots/{{ slot.id }}/edit" hx-swap="none" hx-sync="body:drop" hx-headers='{"X-Hoopline-User":"{{ user_id }}"}'>
+    <form class="identity-form" hx-post="/admin/slots/{{ slot.id }}/edit" hx-swap="none" hx-sync="body:drop" hx-headers='{"X-Hoopline-User":"{{ user_id }}"}' data-confirm-clear="{{ lang.text.clear_confirm }}">
         <input type="hidden" name="revision" value="{{ slot.revision }}">
-        <label for="game-date">Date</label><input id="game-date" type="date" name="date" value="{{ slot.edit_date() }}" required>
-        <label for="game-time">Time</label><input id="game-time" type="time" name="time" value="{{ slot.edit_time() }}" required>
-        <label for="game-venue">Location</label><input id="game-venue" name="venue" value="{{ slot.venue }}" maxlength="120" required>
-        <label for="game-map">Maps link (optional)</label><input id="game-map" type="url" name="map_url" value="{{ slot.map_url }}" maxlength="2048">
+        <label for="game-date">{{ lang.text.date }}</label><input id="game-date" type="date" name="date" value="{{ slot.edit_date() }}" required>
+        <label for="game-time">{{ lang.text.time }}</label><input id="game-time" type="time" name="time" value="{{ slot.edit_time() }}" required>
+        <label for="game-venue">{{ lang.text.location }}</label><input id="game-venue" name="venue" value="{{ slot.venue }}" maxlength="120" required>
+        <label for="game-map">{{ lang.text.map_link }}</label><input id="game-map" type="url" name="map_url" value="{{ slot.map_url }}" maxlength="2048">
         {% if !slot.players.is_empty() || !slot.waitlist.is_empty() %}
-        <fieldset><legend>What should happen to the bookings?</legend>
-            <label><input type="radio" name="bookings" value="keep" required> Keep all bookings</label>
-            <label><input type="radio" name="bookings" value="clear" required> Clear all bookings</label>
-            <p>Clearing removes players and waitlist members. No notifications are sent.</p>
+        <fieldset><legend>{{ lang.text.bookings_question }}</legend>
+            <label><input type="radio" name="bookings" value="keep" required> {{ lang.text.keep_bookings }}</label>
+            <label><input type="radio" name="bookings" value="clear" required> {{ lang.text.clear_bookings }}</label>
+            <p>{{ lang.text.clear_help }}</p>
         </fieldset>
         {% endif %}
-        <button class="btn btn-primary" type="submit">Save game</button>
+        <button class="btn btn-primary" type="submit">{{ lang.text.save_game }}</button>
     </form>
-    <a href="/slots?mode=admin">Back to admin games</a>
-    <a href="/admin/slots/{{ slot.id }}/edit">Reload latest values</a>
+    <a href="/slots?mode=admin">{{ lang.text.back_to_admin }}</a>
+    <a href="/admin/slots/{{ slot.id }}/edit">{{ lang.text.reload_values }}</a>
 </section>
 {% endblock %}

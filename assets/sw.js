@@ -9,14 +9,15 @@ self.addEventListener("push", event => {
     }
     const title = typeof payload.title === "string" && payload.title.length <= 100
         ? payload.title : "Hoopline";
+    const lang = payload.lang === "de" ? "de" : "en";
     const body = typeof payload.body === "string" && payload.body.length <= 300
-        ? payload.body : "Open Hoopline to check your booking.";
+        ? payload.body : lang === "de" ? "Öffne Hoopline, um deine Anmeldung zu prüfen." : "Open Hoopline to check your booking.";
     const url = typeof payload.url === "string" && /^\/slots#slot-[0-9]+$/.test(payload.url)
         ? payload.url : "/slots";
     const tag = typeof payload.tag === "string" && /^promotion:[0-9]+$/.test(payload.tag)
         ? payload.tag : undefined;
     event.waitUntil(self.registration.showNotification(title, {
-        body, tag, icon: "/assets/icon-192.png", data: { url }
+        body, lang, tag, icon: "/assets/icon-192.png", data: { url }
     }));
 });
 

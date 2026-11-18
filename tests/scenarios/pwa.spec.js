@@ -71,6 +71,19 @@ test.describe('joining a full game', () => {
     return player;
   }
 
+  test('shows the waitlist alert controls and denied permission help in German', async ({ app }) => {
+    await fillGame(app);
+    const actor = await app.newActor('Scenario Alice');
+    await actor.page.getByRole('button', { name: 'Deutsch' }).click();
+    await stubPush(actor);
+    await expect(actor.card.locator('[data-alert-hint]')).toHaveText('Erlaube Benachrichtigungen, um vom Nachrücken zu erfahren.');
+    await actor.card.getByRole('button', { name: 'Auf die Warteliste' }).click();
+    await expect(actor.card.getByTestId('booking-status')).toHaveText('Warteliste: Platz 1');
+    await actor.page.evaluate(() => window.answerPermission('denied'));
+    await actor.card.locator('[data-waitlist-alerts] summary').click();
+    await expect(actor.card.locator('[data-alert-help]')).toHaveText('Erlaube Benachrichtigungen in den Einstellungen deines Browsers oder Geräts.');
+  });
+
   for (const permission of ['granted', 'denied']) {
     test(`saves the booking before the user answers ${permission}`, async ({ app }) => {
       await fillGame(app);
