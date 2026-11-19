@@ -65,7 +65,7 @@
                       <option value="de" lang="de" {% if lang.locale.code() == "de" %}selected{% endif %}>Deutsch</option>
                       <option value="en" lang="en" {% if lang.locale.code() == "en" %}selected{% endif %}>English</option>
                   </select>
-                  <noscript><button class="btn btn-small" type="submit">{{ lang.text.apply_language }}</button></noscript>
+                  <button class="btn btn-small" type="submit">{{ lang.text.apply_language }}</button>
               </form>
             </div>
             <p>{{ lang.text.tagline }}</p>

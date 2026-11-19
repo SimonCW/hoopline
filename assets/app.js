@@ -13,8 +13,12 @@
     const languageChanged = locale => (locale === "en" || locale === "de") && locale !== document.documentElement.lang;
 
     const languageSelect = document.getElementById("language-select");
-    languageSelect?.addEventListener("change", () => languageSelect.form.requestSubmit());
-    languageSelect?.form.addEventListener("submit", event => {
+    const languageForm = languageSelect?.form;
+    if (languageForm?.requestSubmit) {
+        languageSelect.addEventListener("change", () => languageForm.requestSubmit());
+        languageForm.querySelector('button[type="submit"]').hidden = true;
+    }
+    languageForm?.addEventListener("submit", event => {
         const { pathname, search, hash } = window.location;
         if (pathname === "/slots" && /^#slot-[0-9]+$/.test(hash)) {
             event.currentTarget.elements.return_to.value = pathname + search + hash;
@@ -22,7 +26,7 @@
     });
 
     function disableBookingControls() {
-        document.querySelectorAll('#slots-content button:not([data-enable-alerts]), #user-selector form button, #refresh-slots, .admin-editor button, #language-select').forEach(control => {
+        document.querySelectorAll('#slots-content button:not([data-enable-alerts]), #user-selector form button, #refresh-slots, .admin-editor button, #language-select, .language-picker button').forEach(control => {
             // Only restore controls disabled by this request, not disabled slot states.
             if (!control.disabled) {
                 control.dataset.requestDisabled = "";

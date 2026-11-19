@@ -4,6 +4,7 @@ test('a player can book, refresh, and cancel in German without changing identity
   await page.goto('/');
   const footer = page.locator('footer');
   await expect(footer.getByLabel('Choose a theme')).toBeVisible();
+  await expect(footer.getByRole('button', { name: 'Apply language' })).toBeHidden();
   await footer.getByLabel(/^Language/).selectOption('de');
   await expect(page.locator('html')).toHaveAttribute('lang', 'de');
   await expect(footer.getByLabel(/^Sprache/)).toHaveValue('de');
@@ -81,4 +82,12 @@ test.describe('language picker without JavaScript', () => {
     await expect(page.locator('html')).toHaveAttribute('lang', 'de');
     await expect(page.getByLabel(/^Sprache/)).toHaveValue('de');
   });
+});
+
+test('the language form still works when app.js fails to load', async ({ page }) => {
+  await page.route('**/assets/app.js', route => route.abort());
+  await page.goto('/');
+  await page.getByLabel(/^Language/).selectOption('de');
+  await page.getByRole('button', { name: 'Apply language' }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'de');
 });
