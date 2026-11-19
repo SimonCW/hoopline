@@ -168,7 +168,8 @@ body { min-height: 100vh; }
 .footer-pickers { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; max-width: 24rem; margin: 0 auto 1.5rem; text-align: left; }
 .footer-pickers > * { display: grid; gap: .35rem; flex: 1 1 8rem; min-width: 0; }
 .footer-pickers label { font-weight: 700; }
-.footer-pickers select { color: #182526; }
+.language-picker select { color: #182526; }
+.theme-picker select { color: #182526; }
 .photo-credits { display: none; max-width: 40rem; margin: .5rem auto 0; }
 :root[data-theme="rockets"] [data-credits="rockets"],
 :root[data-theme="bulls"] [data-credits="bulls"],
