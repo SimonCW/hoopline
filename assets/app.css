@@ -62,8 +62,6 @@ input[type="checkbox"] { width: auto; min-height: auto; }
 .btn-secondary { background: #f7faf8; }
 .btn:disabled { cursor: default; background: #dce3de; border-color: #a3b2a8; color: #4a5d53; }
 .btn-small { min-height: 44px; padding: .5rem .65rem; font-size: .85rem; }
-.language-picker { display: flex; justify-content: flex-end; gap: .375rem; margin-bottom: .75rem; }
-.language-picker [aria-current="true"] { font-weight: 700; opacity: 1; }
 .overview-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; }
 .admin-entry { flex-shrink: 0; }
 .booking-help { color: var(--muted); font-size: .9rem; }
@@ -167,8 +165,10 @@ body { min-height: 100vh; }
 :root:is([data-theme="dark"], [data-theme="rockets"], [data-theme="bulls"], [data-theme="germany"], [data-theme="dirk"], [data-theme="bird"], [data-theme="alba"], [data-theme="knicks"]) footer a { color: #fff; }
 .card { color: #182526; }
 .btn-primary:hover { background: var(--accent); filter: brightness(.8); }
-.theme-picker { display: grid; gap: .35rem; max-width: 18rem; margin: 0 auto 1.5rem; text-align: left; }
-.theme-picker label { font-weight: 700; }
+.footer-pickers { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; max-width: 24rem; margin: 0 auto 1.5rem; text-align: left; }
+.footer-pickers > * { display: grid; gap: .35rem; flex: 1 1 8rem; min-width: 0; }
+.footer-pickers label { font-weight: 700; }
+.language-picker select { color: #182526; }
 .theme-picker select { color: #182526; }
 .theme-award { max-width: 42rem; margin: .75rem auto; }
 .theme-award p { margin: 0 0 .5rem; }

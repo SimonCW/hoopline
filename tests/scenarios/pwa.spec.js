@@ -74,7 +74,9 @@ test.describe('joining a full game', () => {
   test('shows the waitlist alert controls and denied permission help in German', async ({ app }) => {
     await fillGame(app);
     const actor = await app.newActor('Scenario Alice');
-    await actor.page.getByRole('button', { name: 'Deutsch' }).click();
+    await actor.page.getByLabel(/^Language/).selectOption('de');
+    await expect(actor.page.locator('html')).toHaveAttribute('lang', 'de');
+    await actor.page.waitForLoadState('domcontentloaded');
     await stubPush(actor);
     await expect(actor.card.locator('[data-alert-hint]')).toHaveText('Erlaube Benachrichtigungen, um vom Nachrücken zu erfahren.');
     await actor.card.getByRole('button', { name: 'Auf die Warteliste' }).click();

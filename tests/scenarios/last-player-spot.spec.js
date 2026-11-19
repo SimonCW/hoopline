@@ -78,6 +78,7 @@ test('two players contest the last spot, cancellation promotes the waiter, and r
     for (const actor of actors) {
       await expect(actor.card).toHaveAttribute('aria-busy', 'true');
       await expect(actor.card.getByRole('button', { name: 'Sign Up', exact: true })).toBeDisabled();
+      await expect(actor.page.getByLabel(/^Language/)).toBeDisabled();
       await expect(actor.card.getByTestId('booking-status')).toHaveText('Not booked');
     }
     // Neither request reached the server before both browsers had submitted.
@@ -98,6 +99,9 @@ test('two players contest the last spot, cancellation promotes the waiter, and r
     expect.arrayContaining(['Confirmed 🏀', 'Waitlist #1']),
   );
   expect(signupRequests).toEqual([1, 1]);
+  for (const actor of actors) {
+    await expect(actor.page.getByLabel(/^Language/)).toBeEnabled();
+  }
   const winner = (await alice.card.getByTestId('booking-status').textContent()) === 'Confirmed 🏀' ? alice : bob;
   const waiter = winner === alice ? bob : alice;
   await expect(waiter.card.locator('[data-feedback]')).toContainText('Waitlist #1');

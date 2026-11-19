@@ -53,11 +53,13 @@ test('themes unlock from game history and remain accessible', async ({ app, page
   await page.reload();
   await expect(picker).toHaveValue('germany');
   await expect(alba).toBeHidden();
-  await page.getByRole('button', { name: 'Deutsch' }).click();
+  await page.getByLabel(/^Language/).selectOption('de');
   await expect(page.getByLabel('Design auswählen')).toHaveValue('germany');
   await expect(page.getByText(/Glückwunsch zu 5 Spielen ohne Absage am Spieltag/)).toBeVisible();
   await expect(alba).toBeHidden();
-  await page.getByRole('button', { name: 'English' }).click();
+  await page.getByLabel(/^Sprache/).selectOption('en');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await page.waitForLoadState('domcontentloaded');
   await page.context().addCookies([{ name: 'user_id', value: '1002', url: app.baseURL }]);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect(picker.locator('option')).toHaveCount(2);

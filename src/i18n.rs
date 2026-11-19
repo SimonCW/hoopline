@@ -374,7 +374,8 @@ macro_rules! copybook {
 }
 
 copybook! {
-    language: "Language", "Sprache";
+    language: "Language (reloads page)", "Sprache (Seite lädt neu)";
+    apply_language: "Apply language", "Sprache übernehmen";
     skip_to_content: "Skip to content", "Zum Inhalt";
     enable_javascript: "Enable JavaScript to select your name and manage bookings.", "Aktiviere JavaScript, um deinen Namen auszuwählen und Anmeldungen zu verwalten.";
     install: "Install Hoopline", "Hoopline installieren";

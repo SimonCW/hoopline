@@ -12,7 +12,13 @@
     const waitlistEnrollments = new WeakMap();
     const languageChanged = locale => (locale === "en" || locale === "de") && locale !== document.documentElement.lang;
 
-    document.querySelector(".language-picker")?.addEventListener("submit", event => {
+    const languageSelect = document.getElementById("language-select");
+    const languageForm = languageSelect?.form;
+    if (languageForm?.requestSubmit) {
+        languageSelect.addEventListener("change", () => languageForm.requestSubmit());
+        languageForm.querySelector('button[type="submit"]').hidden = true;
+    }
+    languageForm?.addEventListener("submit", event => {
         const { pathname, search, hash } = window.location;
         if (pathname === "/slots" && /^#slot-[0-9]+$/.test(hash)) {
             event.currentTarget.elements.return_to.value = pathname + search + hash;
@@ -20,20 +26,20 @@
     });
 
     function disableBookingControls() {
-        document.querySelectorAll('#slots-content button:not([data-enable-alerts]), #user-selector form button, #refresh-slots, .admin-editor button, .language-picker button').forEach(button => {
+        document.querySelectorAll('#slots-content button:not([data-enable-alerts]), #user-selector form button, #refresh-slots, .admin-editor button, #language-select, .language-picker button').forEach(control => {
             // Only restore controls disabled by this request, not disabled slot states.
-            if (!button.disabled) {
-                button.dataset.requestDisabled = "";
-                button.disabled = true;
+            if (!control.disabled) {
+                control.dataset.requestDisabled = "";
+                control.disabled = true;
             }
         });
     }
 
     function finishRequest() {
         pending = false;
-        document.querySelectorAll('[data-request-disabled]').forEach(button => {
-            button.disabled = false;
-            delete button.dataset.requestDisabled;
+        document.querySelectorAll('[data-request-disabled]').forEach(control => {
+            control.disabled = false;
+            delete control.dataset.requestDisabled;
         });
         document.querySelectorAll('[aria-busy="true"]').forEach(el => el.removeAttribute("aria-busy"));
         document.getElementById("booking-request-status").hidden = true;

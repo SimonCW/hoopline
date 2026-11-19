@@ -2,9 +2,12 @@ import { test, expect } from './fixtures.js';
 
 test('a player can book, refresh, and cancel in German without changing identity', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Deutsch' }).click();
+  const footer = page.locator('footer');
+  await expect(footer.getByLabel('Choose a theme')).toBeVisible();
+  await expect(footer.getByRole('button', { name: 'Apply language' })).toBeHidden();
+  await footer.getByLabel(/^Language/).selectOption('de');
   await expect(page.locator('html')).toHaveAttribute('lang', 'de');
-  await expect(page.getByRole('button', { name: 'Deutsch' })).toHaveAttribute('aria-current', 'true');
+  await expect(footer.getByLabel(/^Sprache/)).toHaveValue('de');
   await page.getByRole('combobox', { name: 'Dein Name' }).fill('Jamali');
   await expect(page.locator('#search-status')).toHaveText(/1 passender Name/);
   await page.getByRole('option', { name: 'Jamali', exact: true }).click();
@@ -30,7 +33,7 @@ test('a player can book, refresh, and cancel in German without changing identity
   await expect(page.locator('#announcements')).toHaveText(/Anmeldung zurückgezogen/);
 
   await page.goto('/slots#slot-2');
-  await page.getByRole('button', { name: 'English' }).click();
+  await footer.getByLabel(/^Sprache/).selectOption('en');
   await expect(page).toHaveURL(/\/slots#slot-2$/);
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.locator('.identity-name')).toHaveText('Jamali');
@@ -40,7 +43,7 @@ test('a player can book, refresh, and cancel in German without changing identity
 test('admin pages keep German through login, updates, and validation', async ({ app }) => {
   const { page } = await app.newActor('Alex');
   await page.getByRole('link', { name: 'Admin UI' }).click();
-  await page.getByRole('button', { name: 'Deutsch' }).click();
+  await page.getByLabel(/^Language/).selectOption('de');
   await expect(page).toHaveURL(/\/admin\/login$/);
   await page.getByLabel('Passwort', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Admin-Bereich öffnen' }).click();
@@ -64,7 +67,27 @@ test('admin pages keep German through login, updates, and validation', async ({ 
   expect(error.status()).toBe(400);
   expect(await error.text()).toContain('Wähle eine Freigabezeit zwischen 04:00 und 23:59 Uhr');
 
-  await page.getByRole('button', { name: 'English' }).click();
+  await page.getByLabel(/^Sprache/).selectOption('en');
   await expect(page).toHaveURL(/\/admin\/schedule$/);
   await expect(page.getByRole('heading', { name: 'Recurring schedule' })).toBeVisible();
+});
+
+test.describe('language picker without JavaScript', () => {
+  test.use({ javaScriptEnabled: false });
+
+  test('applies the selected language with a normal form submission', async ({ page }) => {
+    await page.goto('/');
+    await page.getByLabel(/^Language/).selectOption('de');
+    await page.getByRole('button', { name: 'Apply language' }).click();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'de');
+    await expect(page.getByLabel(/^Sprache/)).toHaveValue('de');
+  });
+});
+
+test('the language form still works when app.js fails to load', async ({ page }) => {
+  await page.route('**/assets/app.js', route => route.abort());
+  await page.goto('/');
+  await page.getByLabel(/^Language/).selectOption('de');
+  await page.getByRole('button', { name: 'Apply language' }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'de');
 });
