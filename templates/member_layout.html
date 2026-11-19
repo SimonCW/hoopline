@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block earned_theme_ids %}{% for award in theme_awards %}{{ award.id }} {% endfor %}{% endblock %}
+{% block earned_theme_options %}
+{% for award in theme_awards %}<option value="{{ award.id }}">{{ award.name }}</option>{% endfor %}
+{% endblock %}

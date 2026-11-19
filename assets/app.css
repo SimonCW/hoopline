@@ -170,6 +170,8 @@ body { min-height: 100vh; }
 .footer-pickers label { font-weight: 700; }
 .language-picker select { color: #182526; }
 .theme-picker select { color: #182526; }
+.theme-award { max-width: 42rem; margin: .75rem auto; }
+.theme-award p { margin: 0 0 .5rem; }
 .photo-credits { display: none; max-width: 40rem; margin: .5rem auto 0; }
 :root[data-theme="rockets"] [data-credits="rockets"],
 :root[data-theme="bulls"] [data-credits="bulls"],

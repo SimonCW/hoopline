@@ -12,7 +12,8 @@
     <script>
         try {
             const theme = localStorage.getItem('hoopline-theme');
-            if (['light', 'dark', 'rockets', 'bulls', 'germany', 'dirk', 'bird', 'alba', 'knicks'].includes(theme)) document.documentElement.dataset.theme = theme;
+            const earned = '{% block earned_theme_ids %}{% endblock %}'.trim().split(/\s+/);
+            if (['light', 'dark', ...earned.filter(Boolean)].includes(theme)) document.documentElement.dataset.theme = theme;
         } catch (_) { /* The default theme also works without storage. */ }
     </script>
     <link href="/assets/app.css" rel="stylesheet">
@@ -49,13 +50,7 @@
                 <select id="theme-select">
                     <option value="light">{{ lang.text.light }}</option>
                     <option value="dark">{{ lang.text.dark }}</option>
-                    <option value="rockets">Houston · 2005</option>
-                    <option value="bulls">Chicago · 1995–96</option>
-                    <option value="germany">Deutschland · 2025</option>
-                    <option value="dirk">Dirk · 2011</option>
-                    <option value="bird">Larry Bird · Boston</option>
-                    <option value="alba">ALBA Berlin · 2026</option>
-                    <option value="knicks">New York · 2026</option>
+                    {% block earned_theme_options %}{% endblock %}
                 </select>
               </div>
               <form class="language-picker" action="/language" method="post" hx-boost="false">
