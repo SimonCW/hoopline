@@ -6,7 +6,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
 
 use crate::{
-    activity::{ActivityKind, BookingActivity, record_booking},
+    activity::{ActivityKind, BookingActivity, record_booking_at},
     error::{AppError, Problem},
     i18n::Locale,
     models::{Slot, UserIdentity},
@@ -81,6 +81,8 @@ pub(crate) async fn admin_add_member(
     if count >= capacity {
         return Err(AppError::BadRequest(Problem::SelectedListFull));
     }
+    let now = crate::clock::now();
+    crate::themes::settle_before_roster_edit(&mut tx, slot_id, now).await?;
     sqlx::query(
         "INSERT INTO bookings (slot_id, user_id, position, is_waitlist, created_at) VALUES (?, ?, ?, ?, ?)",
     )
@@ -88,7 +90,7 @@ pub(crate) async fn admin_add_member(
     .bind(user_id)
     .bind(count + 1)
     .bind(is_waitlist)
-    .bind(crate::clock::now().to_rfc3339_opts(SecondsFormat::Micros, true))
+    .bind(now.to_rfc3339_opts(SecondsFormat::Micros, true))
     .execute(&mut *tx)
     .await?;
     increment_slot_revision(&mut tx, slot_id).await?;
@@ -232,6 +234,7 @@ pub enum CancelOutcome {
     NotSignedUp,
     SlotNotFound,
     Stale,
+    Started,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -671,9 +674,20 @@ pub(crate) async fn signup_with_push(
     user_id: i64,
     binding: Option<&crate::push::Binding>,
 ) -> Result<(SignupOutcome, Option<crate::push::BindOutcome>), sqlx::Error> {
+    signup_with_clock(pool, slot_id, user_id, binding, crate::clock::now).await
+}
+
+async fn signup_with_clock(
+    pool: &SqlitePool,
+    slot_id: i64,
+    user_id: i64,
+    binding: Option<&crate::push::Binding>,
+    clock: impl FnOnce() -> DateTime<Utc>,
+) -> Result<(SignupOutcome, Option<crate::push::BindOutcome>), sqlx::Error> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let now = clock();
     let slot_limits = sqlx::query("SELECT max_players, max_waitlist, julianday(datetime) <= julianday(?) AS started FROM slots WHERE id = ?")
-        .bind(crate::clock::now().to_rfc3339())
+        .bind(now.to_rfc3339())
         .bind(slot_id)
         .fetch_optional(&mut *tx)
         .await?;
@@ -708,11 +722,11 @@ pub(crate) async fn signup_with_push(
         .bind(slot_id)
         .bind(user_id)
         .bind(player_count + 1)
-        .bind(crate::clock::now().to_rfc3339_opts(SecondsFormat::Micros, true))
+        .bind(now.to_rfc3339_opts(SecondsFormat::Micros, true))
         .execute(&mut *tx)
         .await?;
         increment_slot_revision(&mut tx, slot_id).await?;
-        record_booking(
+        record_booking_at(
             &mut tx,
             BookingActivity {
                 kind: ActivityKind::SignedUp,
@@ -721,6 +735,7 @@ pub(crate) async fn signup_with_push(
                 slot_id,
                 caused_by_activity_id: None,
             },
+            now,
         )
         .await?;
         tx.commit().await?;
@@ -739,11 +754,11 @@ pub(crate) async fn signup_with_push(
         .bind(slot_id)
         .bind(user_id)
         .bind(waitlist_count + 1)
-        .bind(crate::clock::now().to_rfc3339_opts(SecondsFormat::Micros, true))
+        .bind(now.to_rfc3339_opts(SecondsFormat::Micros, true))
         .execute(&mut *tx)
         .await?;
         increment_slot_revision(&mut tx, slot_id).await?;
-        record_booking(
+        record_booking_at(
             &mut tx,
             BookingActivity {
                 kind: ActivityKind::SignedUp,
@@ -752,6 +767,7 @@ pub(crate) async fn signup_with_push(
                 slot_id,
                 caused_by_activity_id: None,
             },
+            now,
         )
         .await?;
         let binding_result = if let Some(binding) = binding {
@@ -796,7 +812,15 @@ pub async fn cancel_booking_for_slot(
     slot_id: i64,
     user_id: i64,
 ) -> Result<CancelOutcome, sqlx::Error> {
-    cancel_booking(pool, slot_id, user_id, None, Some(user_id)).await
+    cancel_booking(
+        pool,
+        slot_id,
+        user_id,
+        None,
+        Some(user_id),
+        crate::clock::now,
+    )
+    .await
 }
 
 pub(crate) async fn cancel_booking_checked(
@@ -806,7 +830,7 @@ pub(crate) async fn cancel_booking_checked(
     revision: Option<i64>,
 ) -> Result<CancelOutcome, sqlx::Error> {
     // This entry point is for administrative removal, not player cancellation.
-    cancel_booking(pool, slot_id, user_id, revision, None).await
+    cancel_booking(pool, slot_id, user_id, revision, None, crate::clock::now).await
 }
 
 async fn cancel_booking(
@@ -815,9 +839,13 @@ async fn cancel_booking(
     user_id: i64,
     revision: Option<i64>,
     actor_user_id: Option<i64>,
+    clock: impl FnOnce() -> DateTime<Utc>,
 ) -> Result<CancelOutcome, sqlx::Error> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    if let Some(outcome) = cancellation_slot_status(&mut tx, slot_id, revision).await? {
+    let now = clock();
+    if let Some(outcome) =
+        cancellation_slot_status(&mut tx, slot_id, revision, actor_user_id.map(|_| now)).await?
+    {
         return Ok(outcome);
     }
 
@@ -839,7 +867,7 @@ async fn cancel_booking(
 
     let cancellation_id = if let Some(actor_user_id) = actor_user_id {
         Some(
-            record_booking(
+            record_booking_at(
                 &mut tx,
                 BookingActivity {
                     kind: ActivityKind::Cancelled,
@@ -848,10 +876,12 @@ async fn cancel_booking(
                     slot_id,
                     caused_by_activity_id: None,
                 },
+                now,
             )
             .await?,
         )
     } else {
+        crate::themes::settle_before_roster_edit(&mut tx, slot_id, now).await?;
         None
     };
 
@@ -872,7 +902,7 @@ async fn cancel_booking(
     .await?;
 
     if is_waitlist == 0 {
-        promote_first_waiter(&mut tx, slot_id, actor_user_id, cancellation_id).await?;
+        promote_first_waiter(&mut tx, slot_id, actor_user_id.zip(cancellation_id), now).await?;
     }
     increment_slot_revision(&mut tx, slot_id).await?;
     tx.commit().await?;
@@ -882,8 +912,8 @@ async fn cancel_booking(
 async fn promote_first_waiter(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     slot_id: i64,
-    actor_user_id: Option<i64>,
-    cancellation_id: Option<i64>,
+    cancellation: Option<(i64, i64)>,
+    now: DateTime<Utc>,
 ) -> Result<(), sqlx::Error> {
     let waitlist_top = sqlx::query(
         "SELECT id, position, user_id
@@ -896,16 +926,17 @@ async fn promote_first_waiter(
     .fetch_optional(&mut **tx)
     .await?;
     if let Some(waitlist_top) = waitlist_top {
-        if let Some(actor_user_id) = actor_user_id {
-            record_booking(
+        if let Some((actor_user_id, cancellation_id)) = cancellation {
+            record_booking_at(
                 tx,
                 BookingActivity {
                     kind: ActivityKind::Promoted,
                     actor_user_id,
                     subject_user_id: waitlist_top.try_get("user_id")?,
                     slot_id,
-                    caused_by_activity_id: cancellation_id,
+                    caused_by_activity_id: Some(cancellation_id),
                 },
+                now,
             )
             .await?;
         }
@@ -1035,6 +1066,7 @@ pub(crate) async fn promote_waitlist_checked(
     .fetch_one(&mut *tx)
     .await?;
 
+    crate::themes::settle_before_roster_edit(&mut tx, slot_id, crate::clock::now()).await?;
     sqlx::query(
         "UPDATE bookings
          SET is_waitlist = 0, position = ?
@@ -1077,11 +1109,15 @@ async fn cancellation_slot_status(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     slot_id: i64,
     revision: Option<i64>,
+    member_now: Option<DateTime<Utc>>,
 ) -> Result<Option<CancelOutcome>, sqlx::Error> {
-    let slot = sqlx::query("SELECT revision FROM slots WHERE id = ?")
-        .bind(slot_id)
-        .fetch_optional(&mut **tx)
-        .await?;
+    let slot = sqlx::query(
+        "SELECT revision, julianday(datetime) <= julianday(?) AS started FROM slots WHERE id = ?",
+    )
+    .bind(member_now.map(|now| now.to_rfc3339_opts(SecondsFormat::Micros, true)))
+    .bind(slot_id)
+    .fetch_optional(&mut **tx)
+    .await?;
     let Some(slot) = slot else {
         return Ok(Some(CancelOutcome::SlotNotFound));
     };
@@ -1089,6 +1125,9 @@ async fn cancellation_slot_status(
         && slot.try_get::<i64, _>("revision")? != revision
     {
         return Ok(Some(CancelOutcome::Stale));
+    }
+    if slot.try_get::<Option<bool>, _>("started")? == Some(true) {
+        return Ok(Some(CancelOutcome::Started));
     }
     Ok(None)
 }
@@ -1280,6 +1319,8 @@ pub async fn create_user(pool: &SqlitePool, name: &str) -> Result<UserIdentity, 
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use chrono::{TimeZone, Utc};
     use sqlx::Row;
 
@@ -1303,6 +1344,50 @@ mod tests {
         .await
         .unwrap();
         pool
+    }
+
+    #[tokio::test]
+    async fn accepted_roster_mutations_keep_the_timestamp_from_before_tip_off() {
+        let pool = promotion_fixture().await;
+        sqlx::query("DELETE FROM bookings WHERE user_id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let start = Utc.with_ymd_and_hms(2099, 1, 1, 19, 0, 0).unwrap();
+        let before = start - chrono::Duration::seconds(1);
+        let clock = Cell::new(before);
+        let result = super::signup_with_clock(&pool, 1, 1, None, || clock.replace(start))
+            .await
+            .unwrap();
+        assert_eq!(result.0, super::SignupOutcome::AddedPlayer);
+        assert_eq!(clock.get(), start);
+        let booked_at: String =
+            sqlx::query_scalar("SELECT created_at FROM bookings WHERE user_id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(booked_at, "2099-01-01T18:59:59.000000Z");
+
+        clock.set(before);
+        let result = super::cancel_booking(&pool, 1, 1, None, Some(1), || clock.replace(start))
+            .await
+            .unwrap();
+        assert_eq!(result, super::CancelOutcome::Cancelled);
+        assert_eq!(clock.get(), start);
+        let times: Vec<String> =
+            sqlx::query_scalar("SELECT occurred_at FROM activity_log ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(times, [booked_at.as_str(); 3]);
+        crate::themes::process_started_games(&pool, start)
+            .await
+            .unwrap();
+        let user: i64 = sqlx::query_scalar("SELECT user_id FROM theme_progress")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(user, 2);
     }
 
     #[tokio::test]

@@ -14,7 +14,8 @@
     <script>
         try {
             const theme = localStorage.getItem('hoopline-theme');
-            if (['light', 'dark', 'rockets', 'bulls', 'germany', 'dirk', 'bird', 'alba', 'knicks'].includes(theme)) document.documentElement.dataset.theme = theme;
+            const earned = '{% block earned_theme_ids %}{% endblock %}'.trim().split(/\s+/);
+            if (['light', 'dark', ...earned.filter(Boolean)].includes(theme)) document.documentElement.dataset.theme = theme;
         } catch (_) { /* The default theme also works without storage. */ }
     </script>
     <link href="/assets/app.css" rel="stylesheet">
@@ -36,11 +37,6 @@
         <div id="global-error-banner" class="request-error" role="alert" tabindex="-1" hidden></div>
         <p id="announcements" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
         <p id="booking-request-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true" hidden></p>
-        <form class="language-picker" action="/language" method="post" aria-label="{{ lang.text.language }}" hx-boost="false">
-            <input type="hidden" name="return_to" value="{{ lang.return_to }}">
-            <button class="btn btn-small" name="locale" value="de" lang="de" {% if lang.locale.code() == "de" %}aria-current="true" disabled{% endif %}>Deutsch</button>
-            <button class="btn btn-small" name="locale" value="en" lang="en" {% if lang.locale.code() == "en" %}aria-current="true" disabled{% endif %}>English</button>
-        </form>
         <noscript><p class="request-error">{{ lang.text.enable_javascript }}</p></noscript>
         {% block content %}{% endblock %}
         <footer>
@@ -50,19 +46,24 @@
                 <p>{{ lang.text.install_other }}</p>
                 <button type="button" data-install-app hidden>{{ lang.text.install }}</button>
             </details>
-            <div class="theme-picker">
+            <div class="footer-pickers">
+              <div class="theme-picker">
                 <label for="theme-select">{{ lang.text.theme }}</label>
                 <select id="theme-select">
                     <option value="light">{{ lang.text.light }}</option>
                     <option value="dark">{{ lang.text.dark }}</option>
-                    <option value="rockets">Houston · 2005</option>
-                    <option value="bulls">Chicago · 1995–96</option>
-                    <option value="germany">Deutschland · 2025</option>
-                    <option value="dirk">Dirk · 2011</option>
-                    <option value="bird">Larry Bird · Boston</option>
-                    <option value="alba">ALBA Berlin · 2026</option>
-                    <option value="knicks">New York · 2026</option>
+                    {% block earned_theme_options %}{% endblock %}
                 </select>
+              </div>
+              <form class="language-picker" action="/language" method="post" hx-boost="false">
+                  <input type="hidden" name="return_to" value="{{ lang.return_to }}">
+                  <label for="language-select">{{ lang.text.language }}</label>
+                  <select id="language-select" name="locale">
+                      <option value="de" lang="de" {% if lang.locale.code() == "de" %}selected{% endif %}>Deutsch</option>
+                      <option value="en" lang="en" {% if lang.locale.code() == "en" %}selected{% endif %}>English</option>
+                  </select>
+                  <button class="btn btn-small" type="submit">{{ lang.text.apply_language }}</button>
+              </form>
             </div>
             <p>{{ lang.text.tagline }}</p>
             <details class="photo-credits" data-credits="rockets"><summary>{{ lang.text.photo_credits }}</summary>

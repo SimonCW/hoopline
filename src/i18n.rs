@@ -98,6 +98,19 @@ impl Locale {
             .map_or_else(|| slot.datetime.clone(), |time| self.local_time(time))
     }
 
+    pub(crate) fn theme_awarded(self, award: &crate::themes::Award) -> String {
+        let games = award.milestone;
+        let name = award.name;
+        match self {
+            Self::En => format!(
+                "Congrats on {games} games without a game-day cancellation! You earned the {name} theme."
+            ),
+            Self::De => format!(
+                "Glückwunsch zu {games} Spielen ohne Absage am Spieltag! Du hast das Design {name} freigeschaltet."
+            ),
+        }
+    }
+
     pub(crate) fn local_time(self, time: DateTime<chrono_tz::Tz>) -> String {
         match self {
             Self::En => time.format("%a, %d %b %Y · %H:%M").to_string(),
@@ -361,13 +374,15 @@ macro_rules! copybook {
 }
 
 copybook! {
-    language: "Language", "Sprache";
+    language: "Language (reloads page)", "Sprache (Seite lädt neu)";
+    apply_language: "Apply language", "Sprache übernehmen";
     skip_to_content: "Skip to content", "Zum Inhalt";
     enable_javascript: "Enable JavaScript to select your name and manage bookings.", "Aktiviere JavaScript, um deinen Namen auszuwählen und Anmeldungen zu verwalten.";
     install: "Install Hoopline", "Hoopline installieren";
     install_ios: "On iPhone or iPad, choose Share → Add to Home Screen. Select Open as Web App if available, then open Hoopline from your Home Screen.", "Wähle auf dem iPhone oder iPad „Teilen“ → „Zum Home-Bildschirm“. Aktiviere falls verfügbar „Als Web-App öffnen“. Öffne Hoopline dann vom Home-Bildschirm.";
     install_other: "On other devices, use your browser's install or add to home screen option. Hoopline needs an internet connection. Select your name again in the installed app.", "Nutze auf anderen Geräten die Installationsfunktion deines Browsers oder füge Hoopline zum Startbildschirm hinzu. Hoopline braucht eine Internetverbindung. Wähle deinen Namen in der installierten App erneut aus.";
     theme: "Choose a theme", "Design auswählen";
+    dismiss_theme_award: "Dismiss", "Ausblenden";
     light: "Simple light", "Schlicht und hell";
     dark: "Simple dark", "Schlicht und dunkel";
     tagline: "Hoopline · Fair queues. More basketball.", "Hoopline · Faire Wartelisten. Mehr Basketball.";

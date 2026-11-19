@@ -15,7 +15,7 @@ use crate::{
     error::{AppError, Problem},
     i18n::Language,
     identity::{AdminIdentity, current_user_from_headers},
-    identity_redirect, scheduling,
+    identity_redirect, scheduling, themes,
 };
 
 struct Schedule {
@@ -35,6 +35,7 @@ struct Schedule {
 struct SchedulePage {
     lang: Language,
     title: &'static str,
+    theme_awards: Vec<themes::Award>,
     user_id: i64,
     schedules: Vec<Schedule>,
     release: String,
@@ -101,6 +102,7 @@ pub(crate) async fn page(
         SchedulePage {
             title: lang.text.recurring_schedule,
             lang,
+            theme_awards: themes::awards(&pool, user.id).await?,
             user_id: user.id,
             schedules,
             release,

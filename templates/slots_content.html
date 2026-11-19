@@ -1,6 +1,7 @@
 <section id="slots-content" class="slots-content" data-push-state="{{ push_state }}"
     hx-get="/slots/fragment{% if admin_mode %}?mode=admin{% endif %}" hx-trigger="refresh-slots from:body"
-    hx-swap="outerHTML" hx-sync="body:queue last" aria-labelledby="slots-heading">
+    hx-swap="outerHTML" hx-sync="body:queue last" aria-labelledby="slots-heading"
+    hx-headers='{"X-Hoopline-User": "{{ current_user_id.unwrap_or_default() }}"}'>
     <h2 id="slots-heading" class="sr-only" tabindex="-1">{{ lang.text.next_games }}</h2>
     <div class="overview-intro">
     <p class="booking-help">{{ lang.text.booking_help }}</p>

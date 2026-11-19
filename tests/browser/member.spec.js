@@ -2,11 +2,37 @@ import { test, expect } from '../scenarios/fixtures.js';
 import { randomUUID } from 'node:crypto';
 import AxeBuilder from '@axe-core/playwright';
 
-test('nine themes persist across navigation and remain accessible', async ({ page }) => {
+test('themes unlock from game history and remain accessible', async ({ app, page }) => {
   test.setTimeout(90_000);
   await page.goto('/');
   const picker = page.getByLabel('Choose a theme');
+  await expect(picker.locator('option')).toHaveCount(2);
+  await page.evaluate(() => localStorage.setItem('hoopline-theme', 'alba'));
+  await page.reload();
+  await expect(picker).toHaveValue('light');
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'alba');
+  await picker.selectOption('dark');
+  await page.reload();
+  await expect(picker).toHaveValue('dark');
+
+  await app.restart('2029-12-01T12:00:00Z');
+  await app.seed(`WITH RECURSIVE history(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM history WHERE n<20)
+    INSERT INTO slots (id, datetime, venue)
+    SELECT 2000+n, printf('2029-12-%02dT18:00:00Z', n), 'Past court' FROM history`);
+  await app.seed(`INSERT INTO bookings (slot_id, user_id, position, created_at)
+    SELECT id, 1001, 1, '2029-12-01T12:00:00Z' FROM slots WHERE id BETWEEN 2001 AND 2020`);
+  await app.restart('2030-01-07T12:00:00Z');
+
+  await page.reload();
+  await page.getByRole('combobox', { name: 'Your name' }).fill('Scenario Alice');
+  await page.getByRole('option', { name: 'Scenario Alice', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(picker.locator('option')).toHaveCount(9);
+  expect(await app.query("SELECT id FROM activity_log WHERE kind = 'theme.unlocked'")).toHaveLength(7);
+  const alba = page.locator('[data-theme-award]').filter({ hasText: 'Deutscher Basketball Meister' });
+  await expect(alba).toContainText('10 games without a game-day cancellation');
+  await alba.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(alba).toBeHidden();
   for (const theme of ['light', 'dark', 'rockets', 'bulls', 'dirk', 'bird', 'alba', 'knicks', 'germany']) {
     await picker.selectOption(theme);
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
@@ -20,19 +46,25 @@ test('nine themes persist across navigation and remain accessible', async ({ pag
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
     expect(results.violations).toEqual([]);
   }
+  await page.goto('/admin/login');
+  await expect(picker).toHaveValue('germany');
+  await expect(page.locator('[data-theme-award]')).toHaveCount(0);
+  await page.goto('/slots');
   await page.reload();
   await expect(picker).toHaveValue('germany');
-  await page.locator('#new-member > summary').click();
-  await page.getByLabel('New member name', { exact: true }).fill(`Theme ${randomUUID().slice(0, 8)}`);
-  await page.getByRole('button', { name: 'Create and continue' }).click();
-  await expect(page).toHaveURL(/\/slots$/);
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'germany');
-  await expect(picker).toHaveValue('germany');
-  for (const theme of ['light', 'dark', 'rockets', 'bulls', 'dirk', 'bird', 'alba', 'knicks', 'germany']) {
-    await picker.selectOption(theme);
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
-    expect(results.violations).toEqual([]);
-  }
+  await expect(alba).toBeHidden();
+  await page.getByLabel(/^Language/).selectOption('de');
+  await expect(page.getByLabel('Design auswählen')).toHaveValue('germany');
+  await expect(page.getByText(/Glückwunsch zu 5 Spielen ohne Absage am Spieltag/)).toBeVisible();
+  await expect(alba).toBeHidden();
+  await page.getByLabel(/^Sprache/).selectOption('en');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await page.waitForLoadState('domcontentloaded');
+  await page.context().addCookies([{ name: 'user_id', value: '1002', url: app.baseURL }]);
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(picker.locator('option')).toHaveCount(2);
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'germany');
+  await expect(page.locator('[data-theme-award]')).toHaveCount(0);
 });
 
 async function createMember(page) {

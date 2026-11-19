@@ -7,7 +7,7 @@ It focuses on fair waitlist handling, clear accountability, and less weekly admi
 
 ## Language
 
-Choose **Deutsch** or **English** at the top of any player or admin page.
+Choose **Deutsch** or **English** next to the theme chooser at the bottom of any player or admin page.
 Hoopline starts with a supported browser language or uses English if none
 matches. Your choice stays on this browser. It does not change your selected
 name, your bookings, or the Berlin time zone used for games. If this device has
@@ -60,12 +60,22 @@ Press `q` in Bacon to stop it.
 
 ### Member booking behavior
 
-- Games remain visible through their Berlin calendar day. Signups close when a game starts.
+- Games remain visible through their Berlin calendar day. Member signups and
+  cancellations close when a game starts.
 - On the first visit, enter your name before seeing the booking overview. Fuzzy suggestions support partial names and small spelling errors. Select your existing name, or explicitly add a new member.
 - Select a suggestion before continuing. The app submits the selected member ID, not the search text. Editing the text clears the selection. Existing names cannot sign in through the new-member form.
 - The app remembers your user ID for one year in an `HttpOnly`, `SameSite=Lax` cookie. Returning visitors go straight to the overview. Names and booking details are not stored in the cookie.
 - Use **Log out** at the top right if you selected the wrong name or use a shared device. This clears the cookie, not your bookings. Name selection is not authentication.
 - Expand **Who's playing?** to see the player list and ordered waitlist.
+- Light and Dark are always available. Members earn Houston at 5 qualifying
+  games, ALBA Berlin at 10, Chicago and Deutschland at 15, and Dirk, Larry
+  Bird, and New York at 20. Unlocks are permanent.
+- A game counts if the member is on the player list at tip-off and did not
+  cancel their booking for it on the same Berlin calendar date. Hoopline
+  counts bookings, not attendance. For older games, Hoopline uses the retained
+  roster and activity log. It cannot reconstruct unlogged admin edits.
+- Hoopline records each unlock in the activity log. A notice appears the next
+  time the member opens the booking overview. Dismissal applies to that browser.
 - A member cancellation automatically promotes the first waitlist member. When
   configured, registered devices can receive a best-effort promotion alert.
   Admin actions do not send alerts. Check the roster for the current booking.
