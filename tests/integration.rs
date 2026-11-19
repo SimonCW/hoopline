@@ -1,6 +1,6 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
-use hoopline::{app_with_pool, db};
+use hoopline::{Brand, app_with_pool, app_with_pool_and_brand, db};
 use http_body_util::BodyExt;
 use sqlx::Row;
 use tower::ServiceExt;
@@ -143,7 +143,7 @@ async fn robots_discourages_indexing() {
 
 #[tokio::test]
 async fn pwa_resources_are_local_and_not_cached() {
-    let app = app_with_pool(test_pool().await);
+    let app = app_with_pool_and_brand(test_pool().await, Brand::Slomos);
     for (path, content_type) in [
         ("/manifest.webmanifest", "application/manifest+json"),
         ("/sw.js", "text/javascript; charset=utf-8"),
@@ -182,6 +182,8 @@ async fn pwa_resources_are_local_and_not_cached() {
         }
         if path == "/manifest.webmanifest" {
             let manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(manifest["name"], "Slomos");
+            assert_eq!(manifest["short_name"], "Slomos");
             assert_eq!(manifest["id"], "/");
             assert_eq!(manifest["scope"], "/");
             assert_eq!(manifest["start_url"], "/");
@@ -200,7 +202,7 @@ async fn pwa_resources_are_local_and_not_cached() {
 
 #[tokio::test]
 async fn page_and_icon_urls_use_new_favicons() {
-    let app = app_with_pool(test_pool().await);
+    let app = app_with_pool_and_brand(test_pool().await, Brand::Slomos);
     let response = app
         .clone()
         .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
@@ -298,7 +300,7 @@ async fn page_and_icon_urls_use_new_favicons() {
 
 #[tokio::test]
 async fn welcome_and_overview_show_the_local_logo() {
-    let app = app_with_pool(test_pool().await);
+    let app = app_with_pool_and_brand(test_pool().await, Brand::Slomos);
     for (path, cookie) in [("/", ""), ("/slots", "user_id=1")] {
         let response = app
             .clone()
@@ -306,6 +308,7 @@ async fn welcome_and_overview_show_the_local_logo() {
                 Request::builder()
                     .uri(path)
                     .header(header::COOKIE, cookie)
+                    .header(header::ACCEPT_LANGUAGE, "de")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -314,10 +317,14 @@ async fn welcome_and_overview_show_the_local_logo() {
         assert_eq!(response.status(), StatusCode::OK);
         let html = response_body_string(response).await;
         assert!(html.contains(r#"src="/assets/img/slomos-logo.svg" alt="""#));
-        assert!(html.contains("Hoopline</h1>"));
+        assert!(html.contains("Slomos</h1>"));
+        assert!(html.contains("<title>Slomos"));
+        assert!(html.contains("Slomos installieren"));
+        assert!(!html.contains("Hoopline installieren"));
     }
 
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/assets/img/slomos-logo.svg")
@@ -333,6 +340,73 @@ async fn welcome_and_overview_show_the_local_logo() {
         bytes.as_ref(),
         include_bytes!("../assets/img/slomos-logo.svg")
     );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/missing")
+                .header(header::ACCEPT_LANGUAGE, "de")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(
+        response_body_string(response)
+            .await
+            .contains(" · Slomos</title>")
+    );
+}
+
+#[tokio::test]
+async fn default_brand_retains_the_hoopline_name_and_icons() {
+    let app = app_with_pool(test_pool().await);
+    let get = |path: &str| {
+        app.clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+    };
+    let html = response_body_string(get("/").await.unwrap()).await;
+    assert!(html.contains("Hoopline</h1>"));
+    assert!(html.contains("Install Hoopline"));
+    assert!(!html.contains("/assets/img/"));
+    assert_eq!(
+        get("/favicon.ico").await.unwrap().status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        get("/assets/img/slomos-logo.svg").await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+
+    for (path, expected) in [
+        (
+            "/manifest.webmanifest",
+            include_bytes!("../assets/manifest.webmanifest").as_slice(),
+        ),
+        (
+            "/assets/icon-192.png",
+            include_bytes!("../assets/icon-192.png").as_slice(),
+        ),
+        (
+            "/assets/icon-512.png",
+            include_bytes!("../assets/icon-512.png").as_slice(),
+        ),
+        (
+            "/assets/apple-touch-icon.png",
+            include_bytes!("../assets/apple-touch-icon.png").as_slice(),
+        ),
+    ] {
+        let response = get(path).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert_eq!(
+            response.into_body().collect().await.unwrap().to_bytes(),
+            expected,
+            "{path}"
+        );
+    }
+    let worker = response_body_string(get("/sw.js").await.unwrap()).await;
+    assert!(worker.starts_with("const appName = \"Hoopline\";"));
 }
 
 #[tokio::test]

@@ -6,11 +6,15 @@
     <meta name="theme-color" content="#192638">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <link rel="manifest" href="/manifest.webmanifest">
+    {% if lang.brand.is_slomos() %}
     <link rel="icon" href="/favicon.ico" sizes="32x32">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicons/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/img/favicons/apple-touch-icon.png">
+    {% else %}
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+    {% endif %}
     <meta name="htmx-config" content='{"includeIndicatorStyles": false, "timeout": 15000}'>
-    <title>{% block title %}{{ title }}{% endblock %}</title>
+    <title>{% block title %}{{ title }} · {{ lang.brand.name() }}{% endblock %}</title>
     <script>
         try {
             const theme = localStorage.getItem('hoopline-theme');
@@ -41,10 +45,10 @@
         {% block content %}{% endblock %}
         <footer>
             <details>
-                <summary>{{ lang.text.install }}</summary>
-                <p>{{ lang.text.install_ios }}</p>
-                <p>{{ lang.text.install_other }}</p>
-                <button type="button" data-install-app hidden>{{ lang.text.install }}</button>
+                <summary>{{ lang.branded(lang.text.install) }}</summary>
+                <p>{{ lang.branded(lang.text.install_ios) }}</p>
+                <p>{{ lang.branded(lang.text.install_other) }}</p>
+                <button type="button" data-install-app hidden>{{ lang.branded(lang.text.install) }}</button>
             </details>
             <div class="footer-pickers">
               <div class="theme-picker">
@@ -65,7 +69,7 @@
                   <button class="btn btn-small" type="submit">{{ lang.text.apply_language }}</button>
               </form>
             </div>
-            <p>{{ lang.text.tagline }}</p>
+            <p>{{ lang.branded(lang.text.tagline) }}</p>
             <details class="photo-credits" data-credits="rockets"><summary>{{ lang.text.photo_credits }}</summary>
                 <p>{{ lang.text.credits_rockets }} <a href="https://commons.wikimedia.org/wiki/File:Yao_Ming_Houston_Rockets_2006-03-29.jpg">Yao Ming (keithjj)</a>, <a href="https://commons.wikimedia.org/wiki/File:Tracy_McGrady_2008-02-13.jpg">Tracy McGrady (keithjj)</a> (<a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0</a>); <a href="https://commons.wikimedia.org/wiki/File:Dikembe_Mutombo_(2006-12-10).jpg">Dikembe Mutombo (Keith Allison)</a> (<a href="https://creativecommons.org/licenses/by-sa/2.0/">CC BY-SA 2.0</a>).</p>
             </details>

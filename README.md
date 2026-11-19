@@ -96,8 +96,8 @@ may not transfer. Installation is optional and does not grant notification
 permission. Android Chrome can also receive alerts in a browser tab. Booking
 needs an internet connection.
 
-Browser tabs use a square SVG and a 32×32 ICO fallback. Apple devices have a
-separate 180×180 touch icon. The [web app manifest](assets/manifest.webmanifest)
+The Slomos brand uses a square SVG favicon, a 32×32 ICO fallback, and a
+180×180 Apple touch icon. Its [web app manifest](assets/img/favicons/manifest.webmanifest)
 lists two standard icons and a padded maskable icon for launcher shapes.
 
 When alerts are configured, **Join Waitlist** can ask for notification
@@ -257,6 +257,22 @@ the header and bypass the limits. Additional proxies may cause users to share a
 limit. These limits do not stop distributed attacks.
 
 ## SQLite in production (Hostim)
+
+### Run Hoopline and Slomos side by side
+
+Deploy the same image as two apps. Set `APP_BRAND` on each app:
+
+| Domain | `APP_BRAND` | Data |
+| --- | --- | --- |
+| `hoopline.simoncw.com` | `hoopline` (default) | Separate demo database. Set `PREVIEW_SAMPLE=1` for sample bookings. |
+| `slomos.simoncw.com` | `slomos` | Separate team database. Leave `PREVIEW_SAMPLE` unset. |
+
+Any other `APP_BRAND` value prevents startup. Give each app its own SQLite
+volume and admin password. If you enable push, set `APP_ORIGIN` to the
+app's own HTTPS origin and configure its push credentials. To try the Slomos
+brand locally with disposable sample data, run `APP_BRAND=slomos just preview`.
+
+### Persistent storage
 
 For production, mount a Hostim volume at `/data` and store SQLite there:
 

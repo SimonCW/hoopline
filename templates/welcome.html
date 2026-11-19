@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ title }} · {{ lang.text.choose_name }}{% endblock %}
+{% block title %}{{ lang.brand.name() }} · {{ lang.text.choose_name }}{% endblock %}
 {% block content %}
 <div class="welcome-shell">
     {{ user_selector_html|safe }}

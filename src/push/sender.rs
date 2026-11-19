@@ -17,6 +17,7 @@ use web_push::{
 };
 
 use super::queue::{self, Delivery, ResultKind};
+use crate::Brand;
 
 const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -51,11 +52,12 @@ impl Sender {
         &self,
         delivery: &Delivery,
         now: i64,
+        brand: Brand,
     ) -> Result<web_push::WebPushMessage, &'static str> {
         if !super::valid_endpoint(&delivery.endpoint) {
             return Err("invalid endpoint");
         }
-        let (payload, deadline) = payload(delivery)?;
+        let (payload, deadline) = payload(delivery, brand)?;
         let deadline = deadline.map_or(delivery.expires_at, |start| start.min(delivery.expires_at));
         let ttl = u32::try_from(deadline.saturating_sub(now)).map_err(|_| "invalid expiry")?;
         if ttl == 0 {
@@ -73,16 +75,16 @@ impl Sender {
         builder.build().map_err(|_| "invalid payload")
     }
 
-    async fn send(&self, delivery: Delivery) -> ResultKind {
-        match tokio::time::timeout(SEND_TIMEOUT, self.send_inner(&delivery)).await {
+    async fn send(&self, delivery: Delivery, brand: Brand) -> ResultKind {
+        match tokio::time::timeout(SEND_TIMEOUT, self.send_inner(&delivery, brand)).await {
             Ok(result) => result,
             Err(_) => ResultKind::Retry { retry_after: None },
         }
     }
 
-    async fn send_inner(&self, delivery: &Delivery) -> ResultKind {
+    async fn send_inner(&self, delivery: &Delivery, brand: Brand) -> ResultKind {
         let now = crate::clock::now().timestamp();
-        let Ok(message) = self.message(delivery, now) else {
+        let Ok(message) = self.message(delivery, now, brand) else {
             return ResultKind::Invalid;
         };
         let Ok(url) = url::Url::parse(&delivery.endpoint) else {
@@ -131,7 +133,7 @@ impl Sender {
     }
 }
 
-fn payload(delivery: &Delivery) -> Result<(String, Option<i64>), &'static str> {
+fn payload(delivery: &Delivery, brand: Brand) -> Result<(String, Option<i64>), &'static str> {
     let locale = delivery.locale;
     let text = locale.text();
     let (title, body, url, tag, deadline) = if let Some(booking) = delivery.booking_id {
@@ -142,15 +144,15 @@ fn payload(delivery: &Delivery) -> Result<(String, Option<i64>), &'static str> {
         let venue = delivery.venue.as_deref().ok_or("missing venue")?;
         let local = datetime.with_timezone(&Berlin);
         (
-            text.push_promotion,
-            locale.promotion_message(local, venue),
+            text.push_promotion.to_owned(),
+            locale.promotion_message(local, venue, brand),
             format!("/slots#slot-{slot}"),
             Some(format!("promotion:{booking}")),
             Some(datetime.timestamp()),
         )
     } else {
         (
-            text.push_test,
+            text.push_test.replace("{app}", brand.name()),
             text.push_test_body.to_owned(),
             "/slots".to_owned(),
             None,
@@ -239,7 +241,7 @@ where
     Ok(true)
 }
 
-pub(super) async fn run(pool: SqlitePool, sender: Sender) {
+pub(super) async fn run(pool: SqlitePool, sender: Sender, brand: Brand) {
     let mut timer = tokio::time::interval(Duration::from_secs(5));
     let mut last_cleanup = None;
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -249,7 +251,7 @@ pub(super) async fn run(pool: SqlitePool, sender: Sender) {
             break;
         }
         loop {
-            match work_once(&pool, |delivery| sender.send(delivery)).await {
+            match work_once(&pool, |delivery| sender.send(delivery, brand)).await {
                 Ok(true) if !pool.is_closed() => {}
                 Ok(_) => break,
                 Err(_) => {
@@ -278,7 +280,10 @@ mod tests {
     use web_push::VapidSignatureBuilder;
 
     use super::{Sender, classify, payload, public_ip, retry_delay, work_once};
-    use crate::push::queue::{Delivery, ResultKind};
+    use crate::{
+        Brand,
+        push::queue::{Delivery, ResultKind},
+    };
 
     const PRIVATE: &str = "IQ9Ur0ykXoHS9gzfYX0aBjy9lvdrjx_PFUXmie9YRcY";
     const PUBLIC_SUBSCRIPTION: &str =
@@ -315,29 +320,39 @@ mod tests {
     fn german_push_payload_uses_berlin_time_and_localized_copy() {
         let mut delivery = delivery();
         delivery.locale = crate::i18n::Locale::De;
-        let (plain, _) = payload(&delivery).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&plain).unwrap();
-        assert_eq!(json["title"], "Du spielst mit! 🏀");
-        assert_eq!(json["lang"], "de");
-        assert!(json["body"].as_str().unwrap().contains("20:00 Uhr"));
+        for brand in [Brand::Hoopline, Brand::Slomos] {
+            let (plain, _) = payload(&delivery, brand).unwrap();
+            let json: serde_json::Value = serde_json::from_str(&plain).unwrap();
+            assert_eq!(json["title"], "Du spielst mit! 🏀");
+            assert_eq!(json["lang"], "de");
+            assert!(json["body"].as_str().unwrap().contains("20:00 Uhr"));
+            assert!(json["body"].as_str().unwrap().contains(brand.name()));
+        }
 
         delivery.booking_id = None;
-        let (plain, _) = payload(&delivery).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&plain).unwrap();
-        assert_eq!(json["title"], "Hoopline-Testnachricht");
+        for (brand, title) in [
+            (Brand::Hoopline, "Hoopline-Testnachricht"),
+            (Brand::Slomos, "Slomos-Testnachricht"),
+        ] {
+            let (plain, _) = payload(&delivery, brand).unwrap();
+            let json: serde_json::Value = serde_json::from_str(&plain).unwrap();
+            assert_eq!(json["title"], title);
+        }
     }
 
     #[test]
     fn generates_encrypted_payload_with_bounded_ttl_and_vapid() {
         let sender = sender();
         let delivery = delivery();
-        let (plain, start) = payload(&delivery).unwrap();
+        let (plain, start) = payload(&delivery, Brand::Hoopline).unwrap();
         let json: serde_json::Value = serde_json::from_str(&plain).unwrap();
         assert_eq!(json["url"], "/slots#slot-123");
         assert_eq!(json["tag"], "promotion:42");
         assert!(json["body"].as_str().unwrap().contains("20:00"));
         let start = start.unwrap();
-        let message = sender.message(&delivery, start - 120).unwrap();
+        let message = sender
+            .message(&delivery, start - 120, Brand::Hoopline)
+            .unwrap();
         assert_eq!(message.ttl, 120);
         let encrypted = message.payload.unwrap();
         assert_ne!(encrypted.content, plain.as_bytes());
