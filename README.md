@@ -7,7 +7,7 @@ It focuses on fair waitlist handling, clear accountability, and less weekly admi
 
 ## Language
 
-Choose **Deutsch** or **English** at the top of any player or admin page.
+Choose **Deutsch** or **English** next to the theme chooser at the bottom of any player or admin page.
 Hoopline starts with a supported browser language or uses English if none
 matches. Your choice stays on this browser. It does not change your selected
 name, your bookings, or the Berlin time zone used for games. If this device has
