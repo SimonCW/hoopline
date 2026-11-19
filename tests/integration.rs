@@ -151,6 +151,21 @@ async fn pwa_resources_are_local_and_not_cached() {
         ("/assets/icon-192.png", "image/png"),
         ("/assets/icon-512.png", "image/png"),
         ("/assets/apple-touch-icon.png", "image/png"),
+        ("/assets/img/favicons/favicon.svg", "image/svg+xml"),
+        ("/assets/img/favicons/apple-touch-icon.png", "image/png"),
+        (
+            "/assets/img/favicons/manifest-icon-192.maskable.png",
+            "image/png",
+        ),
+        (
+            "/assets/img/favicons/manifest-icon-512.maskable.png",
+            "image/png",
+        ),
+        (
+            "/assets/img/favicons/manifest-icon-maskable.png",
+            "image/png",
+        ),
+        ("/favicon.ico", "image/vnd.microsoft.icon"),
     ] {
         let response = app
             .clone()
@@ -171,8 +186,153 @@ async fn pwa_resources_are_local_and_not_cached() {
             assert_eq!(manifest["scope"], "/");
             assert_eq!(manifest["start_url"], "/");
             assert_eq!(manifest["display"], "standalone");
+            assert_eq!(
+                manifest["icons"],
+                serde_json::json!([
+                    { "src": "/assets/icon-192.png", "sizes": "192x192", "type": "image/png" },
+                    { "src": "/assets/img/favicons/manifest-icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+                    { "src": "/assets/icon-512.png", "sizes": "512x512", "type": "image/png" }
+                ])
+            );
         }
     }
+}
+
+#[tokio::test]
+async fn page_and_icon_urls_use_new_favicons() {
+    let app = app_with_pool(test_pool().await);
+    let response = app
+        .clone()
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let html = response_body_string(response).await;
+    let browser_icons = html
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with(r#"<link rel="icon""#))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        browser_icons,
+        [
+            r#"<link rel="icon" href="/favicon.ico" sizes="32x32">"#,
+            r#"<link rel="icon" type="image/svg+xml" href="/assets/img/favicons/favicon.svg">"#,
+        ]
+    );
+    assert!(html.contains(
+        r#"<link rel="apple-touch-icon" href="/assets/img/favicons/apple-touch-icon.png">"#
+    ));
+
+    for (path, expected) in [
+        (
+            "/assets/img/favicons/favicon.svg",
+            include_bytes!("../assets/img/favicons/favicon.svg").as_slice(),
+        ),
+        (
+            "/assets/apple-touch-icon.png",
+            include_bytes!("../assets/img/favicons/apple-touch-icon.png").as_slice(),
+        ),
+        (
+            "/assets/img/favicons/apple-touch-icon.png",
+            include_bytes!("../assets/img/favicons/apple-touch-icon.png").as_slice(),
+        ),
+        (
+            "/assets/icon-192.png",
+            include_bytes!("../assets/img/favicons/manifest-icon-192.maskable.png").as_slice(),
+        ),
+        (
+            "/assets/img/favicons/manifest-icon-192.maskable.png",
+            include_bytes!("../assets/img/favicons/manifest-icon-192.maskable.png").as_slice(),
+        ),
+        (
+            "/assets/icon-512.png",
+            include_bytes!("../assets/img/favicons/manifest-icon-512.maskable.png").as_slice(),
+        ),
+        (
+            "/assets/img/favicons/manifest-icon-512.maskable.png",
+            include_bytes!("../assets/img/favicons/manifest-icon-512.maskable.png").as_slice(),
+        ),
+        (
+            "/assets/img/favicons/manifest-icon-maskable.png",
+            include_bytes!("../assets/img/favicons/manifest-icon-maskable.png").as_slice(),
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(bytes.as_ref(), expected, "{path}");
+    }
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/assets/img/favicons/favicon.png")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/favicon.ico")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "image/vnd.microsoft.icon"
+    );
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert!(bytes.starts_with(&[0, 0, 1, 0, 1, 0, 32, 32]));
+}
+
+#[tokio::test]
+async fn welcome_and_overview_show_the_local_logo() {
+    let app = app_with_pool(test_pool().await);
+    for (path, cookie) in [("/", ""), ("/slots", "user_id=1")] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header(header::COOKIE, cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let html = response_body_string(response).await;
+        assert!(html.contains(r#"src="/assets/img/slomos-logo.svg" alt="""#));
+        assert!(html.contains("Hoopline</h1>"));
+    }
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/assets/img/slomos-logo.svg")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "image/svg+xml");
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(
+        bytes.as_ref(),
+        include_bytes!("../assets/img/slomos-logo.svg")
+    );
 }
 
 #[tokio::test]

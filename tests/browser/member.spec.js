@@ -80,10 +80,22 @@ test('compact cards, remembered identity, signup and safe cancellation', async (
   await expect(card.locator('[data-feedback]')).toContainText('Booking cancelled');
 });
 
+test('welcome logo is prominent and fits on a narrow screen', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 844 });
+  await page.goto('/');
+  const logo = page.locator('#welcome-title img');
+  await expect(logo).toBeVisible();
+  expect((await logo.boundingBox()).width).toBeGreaterThanOrEqual(50);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
 test('compact overview header shows the brand above a highlighted member greeting', async ({ page }) => {
   const name = await createMember(page);
   const header = page.locator('#user-selector');
   await expect(page.getByRole('heading', { name: 'Hoopline', exact: true })).toHaveCount(1);
+  const logo = header.locator('.brand img');
+  await expect(logo).toBeVisible();
+  expect(await logo.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
   await expect(header.locator('.member-greeting')).toHaveText(`You're up next, ${name}`);
   await expect(header.locator('.member-greeting > strong.identity-name')).toBeVisible();
   const brand = await header.getByRole('heading', { name: 'Hoopline' }).boundingBox();

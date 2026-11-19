@@ -23,6 +23,7 @@ test("worker shows a safe fallback for malformed pushes", async () => {
     handlers.push({ data: { json() { throw new Error("invalid"); } }, waitUntil(promise) { result = promise; } });
     await result;
     assert.equal(notifications[0].title, "Hoopline");
+    assert.equal(notifications[0].options.icon, "/assets/img/favicons/manifest-icon-192.maskable.png");
     assert.equal(notifications[0].options.data.url, "/slots");
 });
 

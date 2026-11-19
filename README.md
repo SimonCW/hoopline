@@ -86,6 +86,10 @@ may not transfer. Installation is optional and does not grant notification
 permission. Android Chrome can also receive alerts in a browser tab. Booking
 needs an internet connection.
 
+Browser tabs use a square SVG and a 32×32 ICO fallback. Apple devices have a
+separate 180×180 touch icon. The [web app manifest](assets/manifest.webmanifest)
+lists two standard icons and a padded maskable icon for launcher shapes.
+
 When alerts are configured, **Join Waitlist** can ask for notification
 permission. Hoopline saves the booking without waiting for your answer. If
 you already allowed notifications, Hoopline sets up alerts without another

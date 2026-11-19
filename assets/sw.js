@@ -17,7 +17,7 @@ self.addEventListener("push", event => {
     const tag = typeof payload.tag === "string" && /^promotion:[0-9]+$/.test(payload.tag)
         ? payload.tag : undefined;
     event.waitUntil(self.registration.showNotification(title, {
-        body, lang, tag, icon: "/assets/icon-192.png", data: { url }
+        body, lang, tag, icon: "/assets/img/favicons/manifest-icon-192.maskable.png", data: { url }
     }));
 });
 

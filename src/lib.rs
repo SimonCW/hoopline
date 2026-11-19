@@ -282,9 +282,8 @@ fn app_with_push_config(pool: SqlitePool, push_config: push::Config) -> Router {
         .route("/manifest.webmanifest", get(manifest))
         .route("/sw.js", get(service_worker))
         .route("/assets/pwa.js", get(pwa_js))
-        .route("/assets/icon-192.png", get(icon_192))
-        .route("/assets/icon-512.png", get(icon_512))
-        .route("/assets/apple-touch-icon.png", get(apple_touch_icon))
+        .merge(favicon_routes())
+        .route("/assets/img/slomos-logo.svg", get(slomos_logo))
         .route("/assets/app.css", get(app_css))
         .route("/assets/app.js", get(app_js))
         .route("/assets/htmx.min.js", get(htmx_js))
@@ -308,10 +307,6 @@ fn app_with_push_config(pool: SqlitePool, push_config: push::Config) -> Router {
             "/assets/wallpaper/knicks_2026_champions.webp",
             get(knicks_wallpaper),
         )
-        .route(
-            "/favicon.ico",
-            get(|| async { axum::http::StatusCode::NO_CONTENT }),
-        )
         .with_state(pool)
         .layer(Extension(push_config))
         .layer(axum::middleware::from_fn_with_state(
@@ -328,6 +323,31 @@ fn app_with_push_config(pool: SqlitePool, push_config: push::Config) -> Router {
             },
         ))
         .layer(TraceLayer::new_for_http())
+}
+
+fn favicon_routes() -> Router<SqlitePool> {
+    Router::new()
+        .route("/favicon.ico", get(favicon_ico))
+        .route("/assets/icon-192.png", get(icon_192))
+        .route("/assets/icon-512.png", get(icon_512))
+        .route("/assets/apple-touch-icon.png", get(apple_touch_icon))
+        .route("/assets/img/favicons/favicon.svg", get(favicon_svg))
+        .route(
+            "/assets/img/favicons/apple-touch-icon.png",
+            get(apple_touch_icon),
+        )
+        .route(
+            "/assets/img/favicons/manifest-icon-192.maskable.png",
+            get(icon_192),
+        )
+        .route(
+            "/assets/img/favicons/manifest-icon-512.maskable.png",
+            get(icon_512),
+        )
+        .route(
+            "/assets/img/favicons/manifest-icon-maskable.png",
+            get(maskable_icon),
+        )
 }
 
 async fn admin_edit_game_page(
@@ -1042,21 +1062,49 @@ async fn pwa_js() -> impl IntoResponse {
 async fn icon_192() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "image/png")],
-        include_bytes!("../assets/icon-192.png").as_slice(),
+        include_bytes!("../assets/img/favicons/manifest-icon-192.maskable.png").as_slice(),
     )
 }
 
 async fn icon_512() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "image/png")],
-        include_bytes!("../assets/icon-512.png").as_slice(),
+        include_bytes!("../assets/img/favicons/manifest-icon-512.maskable.png").as_slice(),
+    )
+}
+
+async fn maskable_icon() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/png")],
+        include_bytes!("../assets/img/favicons/manifest-icon-maskable.png").as_slice(),
     )
 }
 
 async fn apple_touch_icon() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "image/png")],
-        include_bytes!("../assets/apple-touch-icon.png").as_slice(),
+        include_bytes!("../assets/img/favicons/apple-touch-icon.png").as_slice(),
+    )
+}
+
+async fn favicon_ico() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/vnd.microsoft.icon")],
+        include_bytes!("../assets/img/favicons/favicon.ico").as_slice(),
+    )
+}
+
+async fn favicon_svg() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/svg+xml")],
+        include_bytes!("../assets/img/favicons/favicon.svg").as_slice(),
+    )
+}
+
+async fn slomos_logo() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/svg+xml")],
+        include_bytes!("../assets/img/slomos-logo.svg").as_slice(),
     )
 }
 
