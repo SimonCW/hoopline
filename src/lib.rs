@@ -9,6 +9,7 @@ pub mod models;
 mod push;
 mod rate_limit;
 pub mod scheduling;
+mod themes;
 
 use crate::{
     db::{
@@ -42,6 +43,7 @@ use tower_http::trace::TraceLayer;
 #[template(path = "slots.html")]
 struct SlotsTemplate {
     lang: Language,
+    theme_awards: Vec<themes::Award>,
     user_selector_html: String,
     identity_refresh_html: String,
     title: String,
@@ -111,6 +113,7 @@ struct RevisionForm {
 struct GameEditTemplate {
     lang: Language,
     title: &'static str,
+    theme_awards: Vec<themes::Award>,
     slot: Slot,
     user_id: i64,
 }
@@ -172,6 +175,7 @@ struct UserSelectionForm {
 struct AdminLoginTemplate {
     lang: Language,
     title: &'static str,
+    theme_awards: Vec<themes::Award>,
     error: String,
     user_id: i64,
     user_name: String,
@@ -216,6 +220,9 @@ pub async fn app() -> Result<Router, AppError> {
             }
             if let Err(error) = create_upcoming_slots(&renewal_pool, clock::now()).await {
                 eprintln!("slot renewal failed; will retry in one minute: {error}");
+            }
+            if let Err(error) = themes::process_started_games(&renewal_pool, clock::now()).await {
+                eprintln!("theme progress failed; will retry in one minute: {error}");
             }
         }
     });
@@ -347,6 +354,7 @@ async fn admin_edit_game_page(
         GameEditTemplate {
             title: lang.text.edit_game,
             lang,
+            theme_awards: themes::awards(&pool, user.id).await?,
             slot,
             user_id: user.id,
         }
@@ -404,21 +412,24 @@ async fn index(
     Query(view): Query<ViewQuery>,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
-    let current_user = current_user_from_headers(&pool, &headers).await?;
-    if current_user.is_none() {
+    let Some(current_user) = current_user_from_headers(&pool, &headers).await? else {
         let welcome = WelcomeTemplate {
             title: "Hoopline".into(),
             user_selector_html: render_user_selector(&pool, None, false, lang.clone()).await?,
             lang,
         };
         return Ok(Html(welcome.render()?).into_response());
+    };
+    let current_user_id = Some(current_user.id);
+    let current_user_is_admin = current_user.is_admin;
+    if let Err(error) = themes::process_started_games(&pool, clock::now()).await {
+        eprintln!("theme progress failed; showing saved awards: {error}");
     }
-    let current_user_id = current_user.as_ref().map(|user| user.id);
-    let current_user_is_admin = current_user.as_ref().is_some_and(|user| user.is_admin);
     let template = SlotsTemplate {
-        user_selector_html: render_user_selector(&pool, current_user.as_ref(), false, lang.clone())
+        user_selector_html: render_user_selector(&pool, Some(&current_user), false, lang.clone())
             .await?,
         lang,
+        theme_awards: themes::awards(&pool, current_user.id).await?,
         identity_refresh_html: String::new(),
         title: "Hoopline".to_string(),
         current_user_id,
@@ -454,6 +465,11 @@ async fn slots_fragment(
         return Ok(identity_redirect(&headers, "/"));
     }
     let current_user_id = current_user.as_ref().map(|user| user.id);
+    if let Some(displayed_user) = headers.get("x-hoopline-user")
+        && displayed_user.to_str().ok().and_then(|id| id.parse().ok()) != current_user_id
+    {
+        return Ok(identity_redirect(&headers, "/slots"));
+    }
     let current_user_is_admin = current_user.as_ref().is_some_and(|user| user.is_admin);
     let template = SlotsContentTemplate {
         identity_refresh_html: render_user_selector(
@@ -583,6 +599,9 @@ async fn cancel_slot(
             return Err(AppError::BadRequest(Problem::SlotMissing));
         }
         CancelOutcome::Stale => return Err(AppError::StaleSlot),
+        CancelOutcome::Started => {
+            return Err(AppError::BadRequest(Problem::CancellationClosed));
+        }
     }
 
     let slot = find_slot(&pool, slot_id)
@@ -620,6 +639,9 @@ async fn admin_remove_slot_user(
             return Err(AppError::BadRequest(Problem::SlotMissing));
         }
         CancelOutcome::Stale => return Err(AppError::StaleSlot),
+        CancelOutcome::Started => {
+            return Err(AppError::BadRequest(Problem::CancellationClosed));
+        }
     }
 
     let slot = find_slot(&pool, slot_id)
@@ -888,10 +910,11 @@ async fn admin_login_page(
     let user = current_user_from_headers(&pool, &headers)
         .await?
         .ok_or(AppError::IdentityChanged)?;
-    admin_login_form(&user, lang, "")
+    admin_login_form(&pool, &user, lang, "").await
 }
 
-fn admin_login_form(
+async fn admin_login_form(
+    pool: &SqlitePool,
     user: &UserIdentity,
     lang: Language,
     error: &str,
@@ -900,6 +923,7 @@ fn admin_login_form(
         AdminLoginTemplate {
             title: lang.text.admin_login,
             lang,
+            theme_awards: themes::awards(pool, user.id).await?,
             error: error.into(),
             user_id: user.id,
             user_name: user.name.clone(),
@@ -938,7 +962,9 @@ async fn admin_login(
     if failures >= 5 {
         tx.commit().await?;
         let message = lang.text.too_many_attempts;
-        return Ok(admin_login_form(&user, lang, message)?.into_response());
+        return Ok(admin_login_form(&pool, &user, lang, message)
+            .await?
+            .into_response());
     }
     if !bool::from(password.as_bytes().ct_eq(form.password.as_bytes())) {
         sqlx::query("INSERT INTO admin_login_failures VALUES (?, ?)")
@@ -948,7 +974,9 @@ async fn admin_login(
             .await?;
         tx.commit().await?;
         let message = lang.text.wrong_password;
-        return Ok(admin_login_form(&user, lang, message)?.into_response());
+        return Ok(admin_login_form(&pool, &user, lang, message)
+            .await?
+            .into_response());
     }
     sqlx::query("DELETE FROM admin_login_failures WHERE user_id = ?")
         .bind(user.id)

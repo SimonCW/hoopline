@@ -1,0 +1,6 @@
+{% for award in theme_awards %}
+<div class="card theme-award" data-theme-award="{{ award.activity_id }}">
+    <p>{{ lang.locale.theme_awarded(award) }}</p>
+    <button class="btn btn-small" type="button" data-dismiss-theme-award hidden>{{ lang.text.dismiss_theme_award }}</button>
+</div>
+{% endfor %}
