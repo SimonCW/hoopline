@@ -75,6 +75,8 @@ test.describe('joining a full game', () => {
     await fillGame(app);
     const actor = await app.newActor('Scenario Alice');
     await actor.page.getByLabel(/^Language/).selectOption('de');
+    await expect(actor.page.locator('html')).toHaveAttribute('lang', 'de');
+    await actor.page.waitForLoadState('domcontentloaded');
     await stubPush(actor);
     await expect(actor.card.locator('[data-alert-hint]')).toHaveText('Erlaube Benachrichtigungen, um vom Nachrücken zu erfahren.');
     await actor.card.getByRole('button', { name: 'Auf die Warteliste' }).click();
