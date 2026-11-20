@@ -3,7 +3,7 @@ import { runInNewContext } from "node:vm";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-async function worker() {
+async function worker(appName = "Hoopline") {
     const handlers = {};
     const notifications = [];
     const opened = [];
@@ -13,7 +13,7 @@ async function worker() {
         registration: { showNotification: async (title, options) => notifications.push({ title, options }) },
         clients: { matchAll: async () => [], openWindow: async url => opened.push(url) }
     };
-    runInNewContext(await readFile(new URL("../../assets/sw.js", import.meta.url), "utf8"), { self, URL });
+    runInNewContext(await readFile(new URL("../../assets/sw.js", import.meta.url), "utf8"), { self, URL, appName });
     return { handlers, notifications, opened };
 }
 
@@ -23,7 +23,18 @@ test("worker shows a safe fallback for malformed pushes", async () => {
     handlers.push({ data: { json() { throw new Error("invalid"); } }, waitUntil(promise) { result = promise; } });
     await result;
     assert.equal(notifications[0].title, "Hoopline");
+    assert.equal(notifications[0].options.icon, "/assets/icon-192.png");
     assert.equal(notifications[0].options.data.url, "/slots");
+});
+
+test("worker uses the deployment name in German fallback copy", async () => {
+    const { handlers, notifications } = await worker("Slomos");
+    let result;
+    handlers.push({ data: { json: () => ({ lang: "de" }) }, waitUntil(promise) { result = promise; } });
+    await result;
+    assert.equal(notifications[0].title, "Slomos");
+    assert.equal(notifications[0].options.body, "Öffne Slomos, um deine Anmeldung zu prüfen.");
+    assert.equal(notifications[0].options.icon, "/assets/icon-192.png");
 });
 
 test("worker uses stable promotion tags and rejects external destinations", async () => {

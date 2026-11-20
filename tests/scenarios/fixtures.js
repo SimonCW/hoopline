@@ -20,12 +20,13 @@ export const test = base.extend({
   now: [scenarioNow, { option: true }],
   serviceWorkers: ['block', { option: true }],
   pushEnabled: [false, { option: true }],
+  appBrand: ['hoopline', { option: true }],
   baseURL: async ({ app }, use) => { await use(app.baseURL); },
   _networkIsolation: [async ({ context, app }, use) => {
     await app.blockNetwork(context);
     await use();
   }, { auto: true }],
-  app: async ({ browser, contextOptions, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent, seedProfile, now, serviceWorkers, pushEnabled }, use, testInfo) => {
+  app: async ({ browser, contextOptions, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent, seedProfile, now, serviceWorkers, pushEnabled, appBrand }, use, testInfo) => {
     const directory = await mkdtemp(join(process.env.TMPDIR || tmpdir(), 'hoopline-scenario-'));
     const databasePath = join(directory, 'hoopline.sqlite');
     let port = 0;
@@ -47,6 +48,7 @@ export const test = base.extend({
           DATABASE_URL: `sqlite://${databasePath}`,
           PORT: String(port),
           ADMIN_PASSWORD: 'admin',
+          APP_BRAND: appBrand,
           COOKIE_SECURE: 'false',
           PREVIEW_SAMPLE: '0',
           HOOPLINE_TEST_NOW: currentNow,

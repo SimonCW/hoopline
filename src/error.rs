@@ -9,7 +9,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
 };
 
-use crate::i18n::Locale;
+use crate::{Brand, i18n::Locale};
 
 macro_rules! problems {
     ($($name:ident: $en:literal, $de:literal;)*) => {
@@ -98,7 +98,7 @@ pub enum AppError {
     Migration(#[from] sqlx::migrate::MigrateError),
     #[error("invalid response header value")]
     InvalidHeaderValue(#[from] InvalidHeaderValue),
-    #[error("push configuration error: {0}")]
+    #[error("configuration error: {0}")]
     Configuration(&'static str),
     #[error("Too many requests. Please wait and try again.")]
     RateLimited,
@@ -156,11 +156,17 @@ impl IntoResponse for AppError {
 #[derive(Template)]
 #[template(path = "error.html")]
 struct ErrorTemplate {
+    brand: Brand,
     locale: Locale,
     message: &'static str,
 }
 
 pub(crate) async fn localize_response(mut request: Request, next: Next) -> Response {
+    let brand = request
+        .extensions()
+        .get::<Brand>()
+        .copied()
+        .unwrap_or_default();
     let locale = Locale::from_headers(request.headers());
     request.extensions_mut().insert(locale);
     let mut response = next.run(request).await;
@@ -180,7 +186,11 @@ pub(crate) async fn localize_response(mut request: Request, next: Next) -> Respo
     });
     if let Some(problem) = problem {
         let message = problem.message(locale);
-        let template = ErrorTemplate { locale, message };
+        let template = ErrorTemplate {
+            brand,
+            locale,
+            message,
+        };
         let localized = template.render().map_or_else(
             |_| message.into_response(),
             |body| Html(body).into_response(),

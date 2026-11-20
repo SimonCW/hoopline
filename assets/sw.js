@@ -1,4 +1,4 @@
-// Online only: do not intercept requests or cache roster data.
+// The server defines appName. Do not intercept requests or cache roster data.
 self.addEventListener("push", event => {
     let payload = {};
     try {
@@ -8,10 +8,10 @@ self.addEventListener("push", event => {
         // A malformed push must still produce a visible notification.
     }
     const title = typeof payload.title === "string" && payload.title.length <= 100
-        ? payload.title : "Hoopline";
+        ? payload.title : appName;
     const lang = payload.lang === "de" ? "de" : "en";
     const body = typeof payload.body === "string" && payload.body.length <= 300
-        ? payload.body : lang === "de" ? "Öffne Hoopline, um deine Anmeldung zu prüfen." : "Open Hoopline to check your booking.";
+        ? payload.body : lang === "de" ? `Öffne ${appName}, um deine Anmeldung zu prüfen.` : `Open ${appName} to check your booking.`;
     const url = typeof payload.url === "string" && /^\/slots#slot-[0-9]+$/.test(payload.url)
         ? payload.url : "/slots";
     const tag = typeof payload.tag === "string" && /^promotion:[0-9]+$/.test(payload.tag)

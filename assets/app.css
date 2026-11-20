@@ -29,6 +29,9 @@ a { color: var(--accent); }
 .welcome-card .identity-form { gap: .75rem; }
 .welcome-card .btn { width: 100%; }
 .identity-bar { margin-bottom: .75rem; }
+.brand { display: flex; align-items: center; gap: .35rem; }
+.brand img { width: 1.5rem; height: auto; flex-shrink: 0; }
+.welcome-card .brand img { width: 3.5rem; }
 .brand-row, .identity-summary { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 .brand-row { margin-bottom: .5rem; }
 .brand-row h1 { min-width: 0; }

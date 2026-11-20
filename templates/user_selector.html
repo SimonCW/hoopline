@@ -1,7 +1,7 @@
 {% if selected_user_id.is_none() %}
 <section id="name-step" class="card welcome-card" aria-labelledby="welcome-title" hx-sync="body:drop" hx-disabled-elt="find button">
     <p class="eyebrow">{{ lang.text.next_up }}</p>
-    <h1 id="welcome-title">Hoopline</h1>
+    <h1 id="welcome-title"{% if lang.brand.is_slomos() %} class="brand"{% endif %}>{% if lang.brand.is_slomos() %}{% include "slomos_logo.html" %}{% endif %}{{ lang.brand.name() }}</h1>
     <p class="welcome-intro">{{ lang.text.welcome_intro }}</p>
     <form action="/users/select" method="post" hx-post="/users/select" class="identity-form">
         <input id="selected-user-id" name="selected_user_id" type="hidden" disabled>
@@ -33,7 +33,7 @@
 {% else %}
 <header id="user-selector" class="identity-bar" data-user-id="{{ selected_user_id.unwrap_or_default() }}" hx-headers='{"X-Hoopline-User": "{{ selected_user_id.unwrap_or_default() }}"}' {% if out_of_band %}hx-swap-oob="outerHTML"{% endif %}>
     <div class="brand-row">
-        <h1>Hoopline</h1>
+        <h1{% if lang.brand.is_slomos() %} class="brand"{% endif %}>{% if lang.brand.is_slomos() %}{% include "slomos_logo.html" %}{% endif %}{{ lang.brand.name() }}</h1>
         <form action="/users/logout" method="post"><button type="submit" class="btn btn-secondary">{{ lang.text.logout }}</button></form>
     </div>
     <div class="identity-summary">

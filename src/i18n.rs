@@ -14,6 +14,7 @@ use sqlx::SqlitePool;
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 
 use crate::{
+    Brand,
     error::AppError,
     identity, identity_redirect,
     models::{BookingStatus, Slot},
@@ -267,14 +268,20 @@ impl Locale {
         }
     }
 
-    pub(crate) fn promotion_message(self, time: DateTime<chrono_tz::Tz>, venue: &str) -> String {
+    pub(crate) fn promotion_message(
+        self,
+        time: DateTime<chrono_tz::Tz>,
+        venue: &str,
+        brand: Brand,
+    ) -> String {
         let time = self.local_time(time);
+        let app = brand.name();
         match self {
             Self::En => format!(
-                "You moved off the waitlist for {time} at {venue}. Open Hoopline to check your booking."
+                "You moved off the waitlist for {time} at {venue}. Open {app} to check your booking."
             ),
             Self::De => format!(
-                "Du bist für das Spiel nachgerückt: {time}, {venue}. Öffne Hoopline, um deine Anmeldung zu prüfen."
+                "Du bist für das Spiel nachgerückt: {time}, {venue}. Öffne {app}, um deine Anmeldung zu prüfen."
             ),
         }
     }
@@ -282,9 +289,16 @@ impl Locale {
 
 #[derive(Clone)]
 pub(crate) struct Language {
+    pub(crate) brand: Brand,
     pub(crate) locale: Locale,
     pub(crate) text: &'static Copybook,
     pub(crate) return_to: String,
+}
+
+impl Language {
+    pub(crate) fn branded(&self, copy: &str) -> String {
+        copy.replace("{app}", self.brand.name())
+    }
 }
 
 impl<S: Send + Sync> FromRequestParts<S> for Language {
@@ -305,6 +319,7 @@ impl<S: Send + Sync> FromRequestParts<S> for Language {
             .map_or(&parts.uri, |uri| &uri.0);
         let return_to = uri.path_and_query().map_or("/", |value| value.as_str());
         ready(Ok(Self {
+            brand: parts.extensions.get::<Brand>().copied().unwrap_or_default(),
             locale,
             text: locale.text(),
             return_to: page_path(return_to).unwrap_or("/").to_owned(),
@@ -378,14 +393,14 @@ copybook! {
     apply_language: "Apply language", "Sprache übernehmen";
     skip_to_content: "Skip to content", "Zum Inhalt";
     enable_javascript: "Enable JavaScript to select your name and manage bookings.", "Aktiviere JavaScript, um deinen Namen auszuwählen und Anmeldungen zu verwalten.";
-    install: "Install Hoopline", "Hoopline installieren";
-    install_ios: "On iPhone or iPad, choose Share → Add to Home Screen. Select Open as Web App if available, then open Hoopline from your Home Screen.", "Wähle auf dem iPhone oder iPad „Teilen“ → „Zum Home-Bildschirm“. Aktiviere falls verfügbar „Als Web-App öffnen“. Öffne Hoopline dann vom Home-Bildschirm.";
-    install_other: "On other devices, use your browser's install or add to home screen option. Hoopline needs an internet connection. Select your name again in the installed app.", "Nutze auf anderen Geräten die Installationsfunktion deines Browsers oder füge Hoopline zum Startbildschirm hinzu. Hoopline braucht eine Internetverbindung. Wähle deinen Namen in der installierten App erneut aus.";
+    install: "Install {app}", "{app} installieren";
+    install_ios: "On iPhone or iPad, choose Share → Add to Home Screen. Select Open as Web App if available, then open {app} from your Home Screen.", "Wähle auf dem iPhone oder iPad „Teilen“ → „Zum Home-Bildschirm“. Aktiviere falls verfügbar „Als Web-App öffnen“. Öffne {app} dann vom Home-Bildschirm.";
+    install_other: "On other devices, use your browser's install or add to home screen option. {app} needs an internet connection. Select your name again in the installed app.", "Nutze auf anderen Geräten die Installationsfunktion deines Browsers oder füge {app} zum Startbildschirm hinzu. {app} braucht eine Internetverbindung. Wähle deinen Namen in der installierten App erneut aus.";
     theme: "Choose a theme", "Design auswählen";
     dismiss_theme_award: "Dismiss", "Ausblenden";
     light: "Simple light", "Schlicht und hell";
     dark: "Simple dark", "Schlicht und dunkel";
-    tagline: "Hoopline · Fair queues. More basketball.", "Hoopline · Faire Wartelisten. Mehr Basketball.";
+    tagline: "{app} · Fair queues. More basketball.", "{app} · Faire Wartelisten. Mehr Basketball.";
     photo_credits: "Photo credits", "Fotonachweise";
     image_credits: "Image credits", "Bildnachweise";
     credits_rockets: "The Houston wallpaper is AI-generated. Previously shared reference photos:", "Das Houston-Hintergrundbild wurde mit KI erstellt. Zuvor veröffentlichte Referenzfotos:";
@@ -501,7 +516,7 @@ copybook! {
     wrong_password: "Incorrect password.", "Falsches Passwort.";
     too_many_attempts: "Too many attempts for this member. Try again in 15 minutes.", "Zu viele Versuche für dieses Mitglied. Versuche es in 15 Minuten erneut.";
     push_promotion: "You're playing! 🏀", "Du spielst mit! 🏀";
-    push_test: "Hoopline test alert", "Hoopline-Testnachricht";
+    push_test: "{app} test alert", "{app}-Testnachricht";
     push_test_body: "Promotion alerts are enabled on this device.", "Benachrichtigungen zum Nachrücken sind auf diesem Gerät aktiv.";
     controls_failed: "Booking controls could not load. Check your connection and reload this page.", "Die Anmeldefunktionen konnten nicht geladen werden. Prüfe deine Verbindung und lade diese Seite neu.";
     preparing_booking: "Preparing booking. Booking controls are temporarily unavailable.", "Die Anmeldung wird vorbereitet. Die Bedienelemente sind vorübergehend nicht verfügbar.";
@@ -518,7 +533,7 @@ copybook! {
     search_selected: "{name} selected. Choose Continue.", "{name} ausgewählt. Wähle „Weiter“.";
     alerts_stale: "Log out and select your name again to set up alerts on this device.", "Melde dich ab und wähle deinen Namen erneut, um Benachrichtigungen auf diesem Gerät einzurichten.";
     alerts_unavailable: "Alerts are unavailable. Check your booking here.", "Benachrichtigungen sind nicht verfügbar. Prüfe deine Anmeldung hier.";
-    alerts_install: "On iPhone or iPad, choose Share → Add to Home Screen. Select Open as Web App if offered, then open Hoopline there and select your name.", "Wähle auf dem iPhone oder iPad „Teilen“ → „Zum Home-Bildschirm“. Aktiviere falls verfügbar „Als Web-App öffnen“. Öffne Hoopline dann vom Home-Bildschirm und wähle deinen Namen.";
+    alerts_install: "On iPhone or iPad, choose Share → Add to Home Screen. Select Open as Web App if offered, then open {app} there and select your name.", "Wähle auf dem iPhone oder iPad „Teilen“ → „Zum Home-Bildschirm“. Aktiviere falls verfügbar „Als Web-App öffnen“. Öffne {app} dann vom Home-Bildschirm und wähle deinen Namen.";
     alerts_unsupported: "This browser cannot receive alerts. Check your booking here.", "Dieser Browser kann keine Benachrichtigungen empfangen. Prüfe deine Anmeldung hier.";
     alerts_blocked: "Allow notifications in your browser or device settings.", "Erlaube Benachrichtigungen in den Einstellungen deines Browsers oder Geräts.";
     alerts_help: "Get an alert if you move up. Check your booking here if no alert arrives.", "Lass dich benachrichtigen, wenn du nachrückst. Prüfe deine Anmeldung hier, wenn keine Benachrichtigung ankommt.";

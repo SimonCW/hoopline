@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::{
+    Brand,
     error::{AppError, Problem},
     i18n::{Language, Locale},
     identity::{BookingIdentity, cookie_value, current_user_from_headers, user_id_from_cookie},
@@ -45,7 +46,7 @@ pub(crate) struct Config {
     pub(crate) secure_cookie: bool,
 }
 
-pub(crate) fn initialize(pool: &SqlitePool) -> Result<Config, AppError> {
+pub(crate) fn initialize(pool: &SqlitePool, brand: Brand) -> Result<Config, AppError> {
     let enabled = std::env::var("PUSH_ENABLED").unwrap_or_else(|_| "false".into());
     if enabled == "false" {
         return Ok(Config::default());
@@ -66,7 +67,7 @@ pub(crate) fn initialize(pool: &SqlitePool) -> Result<Config, AppError> {
     let subject = std::env::var("VAPID_SUBJECT")
         .map_err(|_| AppError::Configuration("VAPID_SUBJECT is required"))?;
     let (config, sender) = configuration(&origin, &public, &private, &subject)?;
-    tokio::spawn(sender::run(pool.clone(), sender));
+    tokio::spawn(sender::run(pool.clone(), sender, brand));
     Ok(config)
 }
 
@@ -688,6 +689,7 @@ mod tests {
                 public_key: "public-key".into(),
                 secure_cookie: true,
             },
+            crate::Brand::default(),
         )
     }
 
@@ -1136,7 +1138,7 @@ mod tests {
         .unwrap();
         tx.commit().await.unwrap();
         let cookie = format!("user_id=2; push_device={}", token(1));
-        let response = crate::app_with_push_config(pool.clone(), super::Config::default())
+        let response = crate::app_with_pool(pool.clone())
             .oneshot(request("POST", "/users/logout", &cookie, "", ""))
             .await
             .unwrap();

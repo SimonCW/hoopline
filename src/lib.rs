@@ -1,5 +1,6 @@
 mod activity;
 mod admin_schedule;
+mod brand;
 mod clock;
 pub mod db;
 pub mod error;
@@ -26,10 +27,11 @@ use axum::{
     Extension, Form, Router,
     body::Bytes,
     extract::{DefaultBodyLimit, Path, Query, State},
-    http::{HeaderMap, HeaderName, HeaderValue, header},
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
+pub use brand::Brand;
 use chrono::{NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Europe::Berlin;
 use error::{AppError, Problem};
@@ -46,7 +48,6 @@ struct SlotsTemplate {
     theme_awards: Vec<themes::Award>,
     user_selector_html: String,
     identity_refresh_html: String,
-    title: String,
     current_user_id: Option<i64>,
     current_user_is_admin: bool,
     admin_mode: bool,
@@ -60,7 +61,6 @@ struct SlotsTemplate {
 #[template(path = "welcome.html")]
 struct WelcomeTemplate {
     lang: Language,
-    title: String,
     user_selector_html: String,
 }
 
@@ -191,8 +191,9 @@ struct AdminLoginForm {
 ///
 /// # Errors
 ///
-/// Returns an error when pool initialization or migrations fail.
+/// Returns an error when configuration, pool initialization, or migrations fail.
 pub async fn app() -> Result<Router, AppError> {
+    let brand = Brand::from_env()?;
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
         if FsPath::new("/data").is_dir() {
             "sqlite:///data/hoopline.db".to_string()
@@ -204,7 +205,7 @@ pub async fn app() -> Result<Router, AppError> {
         std::fs::create_dir_all("tmp")?;
     }
     let pool = db::init_pool(&database_url).await?;
-    let push_config = push::initialize(&pool)?;
+    let push_config = push::initialize(&pool, brand)?;
     create_upcoming_slots(&pool, clock::now()).await?;
     if std::env::var("PREVIEW_SAMPLE").as_deref() == Ok("1") {
         db::seed_preview_roster(&pool).await?;
@@ -227,14 +228,19 @@ pub async fn app() -> Result<Router, AppError> {
         }
     });
 
-    Ok(app_with_push_config(pool, push_config))
+    Ok(app_with_push_config(pool, push_config, brand))
 }
 
 pub fn app_with_pool(pool: SqlitePool) -> Router {
-    app_with_push_config(pool, push::Config::default())
+    app_with_pool_and_brand(pool, Brand::default())
 }
 
-fn app_with_push_config(pool: SqlitePool, push_config: push::Config) -> Router {
+/// Builds a router with the given brand and with push disabled.
+pub fn app_with_pool_and_brand(pool: SqlitePool, brand: Brand) -> Router {
+    app_with_push_config(pool, push::Config::default(), brand)
+}
+
+fn app_with_push_config(pool: SqlitePool, push_config: push::Config, brand: Brand) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/slots", get(index))
@@ -289,9 +295,7 @@ fn app_with_push_config(pool: SqlitePool, push_config: push::Config) -> Router {
         .route("/manifest.webmanifest", get(manifest))
         .route("/sw.js", get(service_worker))
         .route("/assets/pwa.js", get(pwa_js))
-        .route("/assets/icon-192.png", get(icon_192))
-        .route("/assets/icon-512.png", get(icon_512))
-        .route("/assets/apple-touch-icon.png", get(apple_touch_icon))
+        .merge(favicon_routes(brand))
         .route("/assets/app.css", get(app_css))
         .route("/assets/app.js", get(app_js))
         .route("/assets/htmx.min.js", get(htmx_js))
@@ -315,10 +319,6 @@ fn app_with_push_config(pool: SqlitePool, push_config: push::Config) -> Router {
             "/assets/wallpaper/knicks_2026_champions.webp",
             get(knicks_wallpaper),
         )
-        .route(
-            "/favicon.ico",
-            get(|| async { axum::http::StatusCode::NO_CONTENT }),
-        )
         .with_state(pool)
         .layer(Extension(push_config))
         .layer(axum::middleware::from_fn_with_state(
@@ -326,6 +326,7 @@ fn app_with_push_config(pool: SqlitePool, push_config: push::Config) -> Router {
             rate_limit::limit_writes,
         ))
         .layer(axum::middleware::from_fn(error::localize_response))
+        .layer(Extension(brand))
         .layer(axum::middleware::map_response(
             |mut response: Response| async move {
                 response
@@ -335,6 +336,36 @@ fn app_with_push_config(pool: SqlitePool, push_config: push::Config) -> Router {
             },
         ))
         .layer(TraceLayer::new_for_http())
+}
+
+fn favicon_routes(brand: Brand) -> Router<SqlitePool> {
+    let routes = Router::new()
+        .route("/assets/icon-192.png", get(icon_192))
+        .route("/assets/icon-512.png", get(icon_512))
+        .route("/assets/apple-touch-icon.png", get(apple_touch_icon));
+    if !brand.is_slomos() {
+        return routes.route("/favicon.ico", get(|| async { StatusCode::NO_CONTENT }));
+    }
+    routes
+        .route("/favicon.ico", get(favicon_ico))
+        .route("/assets/img/slomos-logo.svg", get(slomos_logo))
+        .route("/assets/img/favicons/favicon.svg", get(favicon_svg))
+        .route(
+            "/assets/img/favicons/apple-touch-icon.png",
+            get(apple_touch_icon),
+        )
+        .route(
+            "/assets/img/favicons/manifest-icon-192.maskable.png",
+            get(icon_192),
+        )
+        .route(
+            "/assets/img/favicons/manifest-icon-512.maskable.png",
+            get(icon_512),
+        )
+        .route(
+            "/assets/img/favicons/manifest-icon-maskable.png",
+            get(maskable_icon),
+        )
 }
 
 async fn admin_edit_game_page(
@@ -414,7 +445,6 @@ async fn index(
 ) -> Result<Response, AppError> {
     let Some(current_user) = current_user_from_headers(&pool, &headers).await? else {
         let welcome = WelcomeTemplate {
-            title: "Hoopline".into(),
             user_selector_html: render_user_selector(&pool, None, false, lang.clone()).await?,
             lang,
         };
@@ -431,7 +461,6 @@ async fn index(
         lang,
         theme_awards: themes::awards(&pool, current_user.id).await?,
         identity_refresh_html: String::new(),
-        title: "Hoopline".to_string(),
         current_user_id,
         current_user_is_admin,
         admin_mode: view.admin_mode(current_user_is_admin),
@@ -1046,17 +1075,24 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
-async fn manifest() -> impl IntoResponse {
+async fn manifest(Extension(brand): Extension<Brand>) -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "application/manifest+json")],
-        include_str!("../assets/manifest.webmanifest"),
+        match brand {
+            Brand::Hoopline => include_str!("../assets/manifest.webmanifest"),
+            Brand::Slomos => include_str!("../assets/img/favicons/manifest.webmanifest"),
+        },
     )
 }
 
-async fn service_worker() -> impl IntoResponse {
+async fn service_worker(Extension(brand): Extension<Brand>) -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        include_str!("../assets/sw.js"),
+        format!(
+            "const appName = {:?};\n{}",
+            brand.name(),
+            include_str!("../assets/sw.js")
+        ),
     )
 }
 
@@ -1067,24 +1103,67 @@ async fn pwa_js() -> impl IntoResponse {
     )
 }
 
-async fn icon_192() -> impl IntoResponse {
+async fn icon_192(Extension(brand): Extension<Brand>) -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "image/png")],
-        include_bytes!("../assets/icon-192.png").as_slice(),
+        match brand {
+            Brand::Hoopline => include_bytes!("../assets/icon-192.png").as_slice(),
+            Brand::Slomos => {
+                include_bytes!("../assets/img/favicons/manifest-icon-192.maskable.png").as_slice()
+            }
+        },
     )
 }
 
-async fn icon_512() -> impl IntoResponse {
+async fn icon_512(Extension(brand): Extension<Brand>) -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "image/png")],
-        include_bytes!("../assets/icon-512.png").as_slice(),
+        match brand {
+            Brand::Hoopline => include_bytes!("../assets/icon-512.png").as_slice(),
+            Brand::Slomos => {
+                include_bytes!("../assets/img/favicons/manifest-icon-512.maskable.png").as_slice()
+            }
+        },
     )
 }
 
-async fn apple_touch_icon() -> impl IntoResponse {
+async fn maskable_icon() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "image/png")],
-        include_bytes!("../assets/apple-touch-icon.png").as_slice(),
+        include_bytes!("../assets/img/favicons/manifest-icon-maskable.png").as_slice(),
+    )
+}
+
+async fn apple_touch_icon(Extension(brand): Extension<Brand>) -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/png")],
+        match brand {
+            Brand::Hoopline => include_bytes!("../assets/apple-touch-icon.png").as_slice(),
+            Brand::Slomos => {
+                include_bytes!("../assets/img/favicons/apple-touch-icon.png").as_slice()
+            }
+        },
+    )
+}
+
+async fn favicon_ico() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/vnd.microsoft.icon")],
+        include_bytes!("../assets/img/favicons/favicon.ico").as_slice(),
+    )
+}
+
+async fn favicon_svg() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/svg+xml")],
+        include_bytes!("../assets/img/favicons/favicon.svg").as_slice(),
+    )
+}
+
+async fn slomos_logo() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/svg+xml")],
+        include_bytes!("../assets/img/slomos-logo.svg").as_slice(),
     )
 }
 
