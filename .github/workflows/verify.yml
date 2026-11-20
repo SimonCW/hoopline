@@ -2,6 +2,8 @@ name: Verify
 
 on:
   pull_request:
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
   workflow_dispatch:
@@ -66,3 +68,23 @@ jobs:
           load: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  release-gate:
+    name: Release gate
+    needs: [verify, container-build]
+    # GitHub treats a skipped required job as passing. Fail on every non-success result.
+    if: ${{ always() }}
+    permissions: {}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require verification and container build to pass
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          CONTAINER_RESULT: ${{ needs.container-build.result }}
+        run: |
+          printf 'Verify: %s\nContainer build: %s\n' "$VERIFY_RESULT" "$CONTAINER_RESULT"
+          if [[ "$VERIFY_RESULT" != success || "$CONTAINER_RESULT" != success ]]; then
+            echo "::error::Verify and Container build must both succeed."
+            exit 1
+          fi

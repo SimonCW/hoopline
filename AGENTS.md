@@ -21,7 +21,7 @@
 
 ## Pull requests and releases
 
-- Opening a PR does not authorize a merge or a deploy. Before an authorized merge, wait for GitHub's **Verify** and **Container build** checks on the final PR commit.
+- Opening a PR does not authorize a merge or a deploy. Before an authorized merge, wait for GitHub's **Release gate** check on the final PR commit. It requires **Verify** and **Container build** to pass.
 - After an authorized Hostim deploy, check the running commit and `/healthz`. A healthy response alone can come from the previous release.
 
 ## Rust

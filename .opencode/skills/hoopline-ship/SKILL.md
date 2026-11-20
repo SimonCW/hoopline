@@ -23,13 +23,13 @@ or PR first. Ask if the target is unclear. Follow all tool approval requirements
    Ask the reviewer to distinguish blockers from suggestions and list checks
    it did not run. Do not ask it to edit files, post on GitHub, or deploy.
 3. **Resolve and verify.** Fix blocking findings, add regression tests where
-   practical, and have the reviewer recheck substantive fixes. Wait for both
-   **Verify** and **Container build** on the final PR head. Use
+   practical, and have the reviewer recheck substantive fixes. Wait for
+   **Release gate** on the final PR head. Use
    `hoopline-release-check` for the exact-SHA checks. Stop if review or CI is
    blocked. Do not bypass branch protection or substitute an older green run.
 4. **Merge to `main`.** Require the reviewed head at merge time with
    `gh pr merge --match-head-commit`. Read back the actual merged SHA. Wait for
-   both checks on that SHA's `main` push run before deploying.
+   **Release gate** on that SHA's `main` push run before deploying.
 5. **Deploy and verify.** Confirm the verified SHA is still the tip of `main`.
    If it changed, stop rather than rebuild an unverified revision. Use the
    existing app, `hoopline` in Hostim project `hoops-booking`. Do not trigger a
