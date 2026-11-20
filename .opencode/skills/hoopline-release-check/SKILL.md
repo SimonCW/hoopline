@@ -14,10 +14,11 @@ Do not make bookings or send test alerts.
    `gh pr view <pr> -R SimonCW/hoopline --json url,state,baseRefName,headRefOid,mergeCommit,statusCheckRollup`.
    If no target was given, use the current branch's PR if there is one. Ask if the
    target is unclear. Do not assume the local checkout is the release target.
-2. **Check GitHub CI.** For an open PR, check **Verify** and **Container build** in
-   the rollup for its current head. Report pre-merge status only. For a PR merged
-   to `main`, use `mergeCommit.oid`, not the PR head. For that SHA or an explicit
-   release SHA, find its `main` push run and inspect both jobs:
+2. **Check GitHub CI.** For an open PR, check **Release gate** in the rollup for
+   its current head. If it did not pass, check **Verify** and **Container build**
+   for details. Report pre-merge status only. For a PR merged to `main`, use
+   `mergeCommit.oid`, not the PR head. For that SHA or an explicit release SHA,
+   find its `main` push run and check **Release gate**:
 
    ```sh
    gh run list -R SimonCW/hoopline --workflow verify.yml --branch main --event push \
@@ -26,7 +27,7 @@ Do not make bookings or send test alerts.
      --jq '{headSha,url,jobs:[.jobs[]|{name,status,conclusion}]}'
    ```
 
-   Count only completed, successful jobs for the target. Report pending, failed,
+   Count only a completed, successful gate for the target. Report pending, failed,
    skipped, or missing checks as such. Do not substitute a passing PR run for a
    missing or failed `main` run.
 3. **Check production for a release SHA.** Read the Hostim build and runtime
@@ -43,5 +44,5 @@ Do not make bookings or send test alerts.
    deploy timestamp predates the target build, do not claim that the target is
    live. A `200` alone can come from the previous release.
 
-Report the target SHA, both CI jobs, and the Hostim revision and HTTP result if
+Report the target SHA, the gate result, and the Hostim revision and HTTP result if
 checked. Link the PR or CI run. Report unavailable evidence as unverified.
