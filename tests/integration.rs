@@ -319,6 +319,7 @@ async fn welcome_and_overview_show_the_local_logo() {
         assert!(html.contains(r#"src="/assets/img/slomos-logo.svg" alt="""#));
         assert!(html.contains("Slomos</h1>"));
         assert!(html.contains("<title>Slomos"));
+        assert!(html.contains(r#"<meta name="apple-mobile-web-app-title" content="Slomos">"#));
         assert!(html.contains("Slomos installieren"));
         assert!(!html.contains("Hoopline installieren"));
     }
@@ -368,6 +369,7 @@ async fn default_brand_retains_the_hoopline_name_and_icons() {
     };
     let html = response_body_string(get("/").await.unwrap()).await;
     assert!(html.contains("Hoopline</h1>"));
+    assert!(html.contains(r#"<meta name="apple-mobile-web-app-title" content="Hoopline">"#));
     assert!(html.contains("Install Hoopline"));
     assert!(!html.contains("/assets/img/"));
     assert_eq!(
