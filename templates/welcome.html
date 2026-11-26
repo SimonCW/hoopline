@@ -2,6 +2,19 @@
 {% block title %}{{ lang.brand.name() }} · {{ lang.text.choose_name }}{% endblock %}
 {% block content %}
 <div class="welcome-shell">
+    <aside class="card install-banner" data-install-banner aria-labelledby="install-title" hidden>
+        <img src="/assets/apple-touch-icon.png" alt="" width="44" height="44">
+        <h2 id="install-title">{{ lang.branded(lang.text.install) }}</h2>
+        <button type="button" class="btn btn-small install-dismiss" data-install-dismiss aria-label="{{ lang.text.dismiss_install }}">×</button>
+        <div class="install-banner-copy">
+            <div data-install-apple hidden>
+                <p>{{ lang.text.install_ios_notifications }}</p>
+                <p>{{ lang.branded(lang.text.install_ios) }}</p>
+            </div>
+            <p data-install-manual hidden>{{ lang.text.install_phone }}</p>
+            <button type="button" class="btn btn-primary btn-small" data-install-app hidden>{{ lang.text.install_button }}</button>
+        </div>
+    </aside>
     {{ user_selector_html|safe }}
 </div>
 {% endblock %}

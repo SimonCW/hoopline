@@ -3,19 +3,73 @@
     const worker = "serviceWorker" in navigator
         ? navigator.serviceWorker.register("/sw.js")
             .then(() => navigator.serviceWorker.ready).catch(() => null) : Promise.resolve(null);
-    const installButton = document.querySelector("[data-install-app]");
-    window.addEventListener("beforeinstallprompt", event => {
-        if (!installButton) return;
-        event.preventDefault();
-        installButton.hidden = false;
-        installButton.onclick = () => {
-            installButton.hidden = true;
-            event.prompt();
-        };
-    });
-    window.addEventListener("appinstalled", () => {
-        if (installButton) installButton.hidden = true;
-    });
+    const standalone = window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone === true;
+    const appleMobile = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+        (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
+    function setupInstall() {
+        const buttons = document.querySelectorAll("[data-install-app]");
+        if (standalone || !buttons.length) return;
+
+        const banner = document.querySelector("[data-install-banner]");
+        const mobile = appleMobile || navigator.userAgentData?.mobile || /Android|Mobi/.test(navigator.userAgent);
+        const dismissKey = "hoopline-install-banner-dismissed";
+        let dismissed = false;
+        try { dismissed = sessionStorage.getItem(dismissKey) === "true"; } catch (_) {}
+        const dismiss = banner?.querySelector("[data-install-dismiss]");
+        const manual = banner?.querySelector("[data-install-manual]");
+        let installPrompt;
+        let installed = false;
+
+        function renderInstall() {
+            buttons.forEach(button => { button.hidden = !installPrompt; });
+            if (manual) manual.hidden = appleMobile || Boolean(installPrompt);
+        }
+
+        function hideBanner() {
+            if (!banner) return;
+            const hadFocus = banner.contains(document.activeElement);
+            banner.hidden = true;
+            if (hadFocus) document.getElementById("welcome-title").focus();
+        }
+
+        if (banner && mobile && !dismissed) {
+            banner.querySelector("[data-install-apple]").hidden = !appleMobile;
+            banner.hidden = false;
+            dismiss.onclick = () => {
+                try { sessionStorage.setItem(dismissKey, "true"); } catch (_) {}
+                hideBanner();
+            };
+        }
+        renderInstall();
+
+        window.addEventListener("beforeinstallprompt", event => {
+            if (appleMobile || installed) return;
+            event.preventDefault();
+            installPrompt = event;
+            renderInstall();
+        });
+        buttons.forEach(button => {
+            button.onclick = async () => {
+                if (!installPrompt) return;
+                const prompt = installPrompt;
+                installPrompt = null;
+                try { await prompt.prompt(); } catch (_) {
+                    // The browser menu still offers a way to install.
+                }
+                if (!installed && button === document.activeElement && banner?.contains(button)) dismiss.focus();
+                renderInstall();
+            };
+        });
+        window.addEventListener("appinstalled", () => {
+            installed = true;
+            installPrompt = null;
+            hideBanner();
+            renderInstall();
+        });
+    }
+
+    setupInstall();
     if (!controls) return;
     const messages = controls.dataset;
 
@@ -31,9 +85,6 @@
     const promptKey = "hoopline-waitlist-permission-requested";
     try { prompted = sessionStorage.getItem(promptKey) === "true"; } catch (_) {}
     const supported = "Notification" in window && "PushManager" in window && "serviceWorker" in navigator;
-    const standalone = window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone === true;
-    const appleMobile = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
-        (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
     const permission = () => supported ? Notification.permission : "unsupported";
     const available = () => status?.available && status.state !== "unavailable" && status.state !== "stale";
     const canPrompt = () => available() && status.state !== "disabled" && permission() === "default" && !prompted;
