@@ -12,7 +12,7 @@
         if (standalone || !buttons.length) return;
 
         const banner = document.querySelector("[data-install-banner]");
-        const mobile = appleMobile || navigator.userAgentData?.mobile || /Mobi/.test(navigator.userAgent);
+        const mobile = appleMobile || navigator.userAgentData?.mobile || /Android|Mobi/.test(navigator.userAgent);
         const dismissKey = "hoopline-install-banner-dismissed";
         let dismissed = false;
         try { dismissed = sessionStorage.getItem(dismissKey) === "true"; } catch (_) {}

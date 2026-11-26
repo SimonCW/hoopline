@@ -43,8 +43,7 @@ test.describe('iPhone install guidance', () => {
   });
 });
 
-test('the Android banner uses the browser install prompt when available', async ({ page, isMobile }) => {
-  test.skip(!isMobile, 'Mobile browser only');
+async function suppressRealInstallPrompt(page) {
   await page.addInitScript(() => {
     window.addEventListener('beforeinstallprompt', event => {
       if (event.isTrusted) {
@@ -53,11 +52,9 @@ test('the Android banner uses the browser install prompt when available', async 
       }
     });
   });
-  await page.goto('/');
-  const banner = page.getByRole('complementary', { name: 'Install Hoopline' });
-  const manual = banner.getByText(/Open your browser menu/);
-  await expect(manual).toBeVisible();
+}
 
+async function offerInstallPrompt(page) {
   await page.evaluate(() => {
     window.installRequests = 0;
     const event = new Event('beforeinstallprompt', { cancelable: true });
@@ -67,6 +64,17 @@ test('the Android banner uses the browser install prompt when available', async 
     };
     window.dispatchEvent(event);
   });
+}
+
+test('the Android banner uses the browser install prompt when available', async ({ page, isMobile }) => {
+  test.skip(!isMobile, 'Mobile browser only');
+  await suppressRealInstallPrompt(page);
+  await page.goto('/');
+  const banner = page.getByRole('complementary', { name: 'Install Hoopline' });
+  const manual = banner.getByText(/Open your browser menu/);
+  await expect(manual).toBeVisible();
+
+  await offerInstallPrompt(page);
   const install = banner.getByRole('button', { name: 'Install', exact: true });
   await expect(manual).toBeHidden();
   await install.click();
@@ -75,6 +83,31 @@ test('the Android banner uses the browser install prompt when available', async 
 
   await page.evaluate(() => window.dispatchEvent(new Event('appinstalled')));
   await expect(banner).toBeHidden();
+});
+
+test('an Android tablet shows the banner and keeps the footer install button after dismissal', async ({ page, isMobile }) => {
+  test.skip(!isMobile, 'Mobile browser only');
+  await suppressRealInstallPrompt(page);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value: 'Mozilla/5.0 (Linux; Android 14; Pixel Tablet) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    });
+    Object.defineProperty(navigator, 'userAgentData', { value: { mobile: false } });
+  });
+  await page.goto('/');
+  const banner = page.getByRole('complementary', { name: 'Install Hoopline' });
+  await expect(banner).toBeVisible();
+  await offerInstallPrompt(page);
+  await expect(banner.getByRole('button', { name: 'Install', exact: true })).toBeVisible();
+  await banner.getByRole('button', { name: 'Dismiss install banner' }).click();
+  await expect(banner).toBeHidden();
+
+  const footer = page.locator('footer');
+  await footer.locator('summary').filter({ hasText: 'Install Hoopline' }).click();
+  const install = footer.getByRole('button', { name: 'Install Hoopline', exact: true });
+  await install.click();
+  await expect(install).toBeHidden();
+  expect(await page.evaluate(() => window.installRequests)).toBe(1);
 });
 
 async function stubPush(actor, { state = 'unregistered', permission = 'default', real = false, stall = false } = {}) {
