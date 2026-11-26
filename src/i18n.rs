@@ -424,7 +424,6 @@ copybook! {
     logout: "Log out", "Abmelden";
     refresh_slots: "Refresh slots", "Spiele aktualisieren";
     next_games: "Upcoming slots", "Nächste Spiele";
-    booking_help: "Pick a slot and join. If the player list is full, join the waitlist. When a player cancels, the first person in line moves up automatically.", "Wähle ein Spiel und melde dich an. Wenn alle Plätze belegt sind, trag dich auf die Warteliste ein. Wird ein Platz frei, rückt die erste Person automatisch nach.";
     leave_admin: "Leave Admin", "Admin-Bereich verlassen";
     admin_ui: "Admin UI", "Admin-Bereich";
     admin_mode: "Admin mode", "Admin-Modus";
