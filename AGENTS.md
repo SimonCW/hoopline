@@ -5,6 +5,11 @@
 - Use ASD-STE100 Simplified Technical English. Use short sentences and active voice.
 - State the result first. Report which checks passed, failed, or did not run.
 
+## Git worktrees
+
+- Before editing files for a new task, create a separate Git worktree with a new branch. Work in that worktree.
+- If the session already uses a worktree for that task, reuse it. Skip worktree setup for read-only requests or when the user specifies a checkout.
+
 ## Run and test
 
 - Start with `Justfile`. Use `just preview` for sample data in a disposable database. Never seed a database that contains real bookings.
