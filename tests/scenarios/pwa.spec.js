@@ -1,12 +1,80 @@
+import { devices } from '@playwright/test';
 import { test, expect, scenarioPushOrigin, scenarioPushPublicKey } from './fixtures.js';
 
 test.use({ serviceWorkers: 'allow' });
 
-test('the welcome page does not ask users to install or enable alerts', async ({ page }) => {
+test('the desktop welcome page does not show the install banner or ask for alerts', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Desktop browser only');
   await page.goto('/');
   await expect(page.getByRole('combobox', { name: 'Your name' })).toBeVisible();
   await expect(page.getByRole('heading', { name: /install Hoopline|promotion alerts/i })).toHaveCount(0);
-  await expect(page.getByText('On iPhone or iPad,', { exact: false })).toBeHidden();
+  await expect(page.locator('footer').getByText('On iPhone or iPad,', { exact: false })).toBeHidden();
+});
+
+test.describe('iPhone install guidance', () => {
+  test.use({ userAgent: devices['iPhone 13'].userAgent });
+
+  test('shows localized Home Screen steps and lets the player dismiss them', async ({ page, isMobile }) => {
+    test.skip(!isMobile, 'Mobile browser only');
+    await page.goto('/');
+    const banner = page.getByRole('complementary', { name: 'Install Hoopline' });
+    await expect(banner.getByText(/need the Home Screen app to get waitlist notifications/)).toBeVisible();
+    await expect(banner.getByText(/Share → Add to Home Screen/)).toBeVisible();
+    await expect(banner.getByRole('button', { name: 'Install', exact: true })).toBeHidden();
+    await expect(page.getByRole('combobox', { name: 'Your name' })).toBeVisible();
+
+    await page.getByLabel(/^Language/).selectOption('de');
+    const germanBanner = page.getByRole('complementary', { name: 'Hoopline installieren' });
+    await expect(germanBanner.getByText(/„Teilen“ → „Zum Home-Bildschirm“/)).toBeVisible();
+    await germanBanner.getByRole('button', { name: 'Installationshinweis ausblenden' }).click();
+    await expect(germanBanner).toBeHidden();
+    await expect(page.getByRole('heading', { level: 1 })).toBeFocused();
+    await page.reload();
+    await expect(germanBanner).toBeHidden();
+    await expect(page.getByRole('combobox', { name: 'Dein Name' })).toBeVisible();
+  });
+
+  test('hides the banner when opened from the iPhone Home Screen', async ({ page, isMobile }) => {
+    test.skip(!isMobile, 'Mobile browser only');
+    await page.addInitScript(() => Object.defineProperty(navigator, 'standalone', { value: true }));
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Install Hoopline' })).toBeHidden();
+    await expect(page.getByRole('combobox', { name: 'Your name' })).toBeVisible();
+  });
+});
+
+test('the Android banner uses the browser install prompt when available', async ({ page, isMobile }) => {
+  test.skip(!isMobile, 'Mobile browser only');
+  await page.addInitScript(() => {
+    window.addEventListener('beforeinstallprompt', event => {
+      if (event.isTrusted) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    });
+  });
+  await page.goto('/');
+  const banner = page.getByRole('complementary', { name: 'Install Hoopline' });
+  const manual = banner.getByText(/Open your browser menu/);
+  await expect(manual).toBeVisible();
+
+  await page.evaluate(() => {
+    window.installRequests = 0;
+    const event = new Event('beforeinstallprompt', { cancelable: true });
+    event.prompt = async () => {
+      window.installRequests++;
+      return { outcome: 'dismissed' };
+    };
+    window.dispatchEvent(event);
+  });
+  const install = banner.getByRole('button', { name: 'Install', exact: true });
+  await expect(manual).toBeHidden();
+  await install.click();
+  await expect(manual).toBeVisible();
+  expect(await page.evaluate(() => window.installRequests)).toBe(1);
+
+  await page.evaluate(() => window.dispatchEvent(new Event('appinstalled')));
+  await expect(banner).toBeHidden();
 });
 
 async function stubPush(actor, { state = 'unregistered', permission = 'default', real = false, stall = false } = {}) {

@@ -394,7 +394,11 @@ copybook! {
     skip_to_content: "Skip to content", "Zum Inhalt";
     enable_javascript: "Enable JavaScript to select your name and manage bookings.", "Aktiviere JavaScript, um deinen Namen auszuwählen und Anmeldungen zu verwalten.";
     install: "Install {app}", "{app} installieren";
-    install_ios: "On iPhone or iPad, choose Share → Add to Home Screen. Select Open as Web App if available, then open {app} from your Home Screen.", "Wähle auf dem iPhone oder iPad „Teilen“ → „Zum Home-Bildschirm“. Aktiviere falls verfügbar „Als Web-App öffnen“. Öffne {app} dann vom Home-Bildschirm.";
+    install_button: "Install", "Installieren";
+    dismiss_install: "Dismiss install banner", "Installationshinweis ausblenden";
+    install_ios_notifications: "On iPhone and iPad, you need the Home Screen app to get waitlist notifications.", "Auf dem iPhone und iPad brauchst du die App auf dem Home-Bildschirm, um Wartelisten-Benachrichtigungen zu erhalten.";
+    install_phone: "Open your browser menu and choose Install app or Add to Home screen.", "Öffne das Browsermenü und wähle „App installieren“ oder „Zum Startbildschirm hinzufügen“.";
+    install_ios: "On iPhone or iPad, choose Share → Add to Home Screen. Look in the browser menu if you do not see Share. Turn on Open as Web App if shown, then tap Add. Open {app} from your Home Screen.", "Wähle auf dem iPhone oder iPad „Teilen“ → „Zum Home-Bildschirm“. Wenn du „Teilen“ nicht siehst, öffne das Browsermenü. Aktiviere falls verfügbar „Als Web-App öffnen“ und tippe auf „Hinzufügen“. Öffne {app} vom Home-Bildschirm.";
     install_other: "On other devices, use your browser's install or add to home screen option. {app} needs an internet connection. Select your name again in the installed app.", "Nutze auf anderen Geräten die Installationsfunktion deines Browsers oder füge {app} zum Startbildschirm hinzu. {app} braucht eine Internetverbindung. Wähle deinen Namen in der installierten App erneut aus.";
     theme: "Choose a theme", "Design auswählen";
     dismiss_theme_award: "Dismiss", "Ausblenden";

@@ -1,7 +1,7 @@
 {% if selected_user_id.is_none() %}
 <section id="name-step" class="card welcome-card" aria-labelledby="welcome-title" hx-sync="body:drop" hx-disabled-elt="find button">
     <p class="eyebrow">{{ lang.text.next_up }}</p>
-    <h1 id="welcome-title"{% if lang.brand.is_slomos() %} class="brand"{% endif %}>{% if lang.brand.is_slomos() %}{% include "slomos_logo.html" %}{% endif %}{{ lang.brand.name() }}</h1>
+    <h1 id="welcome-title" tabindex="-1"{% if lang.brand.is_slomos() %} class="brand"{% endif %}>{% if lang.brand.is_slomos() %}{% include "slomos_logo.html" %}{% endif %}{{ lang.brand.name() }}</h1>
     <p class="welcome-intro">{{ lang.text.welcome_intro }}</p>
     <form action="/users/select" method="post" hx-post="/users/select" class="identity-form">
         <input id="selected-user-id" name="selected_user_id" type="hidden" disabled>
