@@ -65,9 +65,7 @@ input[type="checkbox"] { width: auto; min-height: auto; }
 .btn-secondary { background: #f7faf8; }
 .btn:disabled { cursor: default; background: #dce3de; border-color: #a3b2a8; color: #4a5d53; }
 .btn-small { min-height: 44px; padding: .5rem .65rem; font-size: .85rem; }
-.overview-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; }
-.admin-entry { flex-shrink: 0; }
-.booking-help { color: var(--muted); font-size: .9rem; }
+.admin-entry { display: flex; justify-content: flex-end; }
 .week-heading { margin: 1.5rem 0 .75rem; color: #3b5147; }
 .slot-grid { display: grid; gap: 1rem; }
 .slot-card { min-width: 0; }
@@ -164,7 +162,7 @@ body { min-height: 100vh; }
 :root[data-theme="alba"] body { background-image: linear-gradient(120deg, rgba(4, 20, 38, .80), rgba(4, 20, 38, .64)), url('/assets/wallpaper/alba_berlin_2026_yellow_blue.webp'); background-position: center, right center; }
 :root[data-theme="knicks"] body { background-image: linear-gradient(120deg, rgba(4, 20, 38, .80), rgba(4, 20, 38, .64)), url('/assets/wallpaper/knicks_2026_champions.webp'); background-position: center, right center; }
 :root:is([data-theme="dark"], [data-theme="rockets"], [data-theme="bulls"], [data-theme="germany"], [data-theme="dirk"], [data-theme="bird"], [data-theme="alba"], [data-theme="knicks"]) .app-shell { color: #fff; }
-:root:is([data-theme="dark"], [data-theme="rockets"], [data-theme="bulls"], [data-theme="germany"], [data-theme="dirk"], [data-theme="bird"], [data-theme="alba"], [data-theme="knicks"]) :is(footer, .member-greeting, .booking-help, .week-heading) { color: #fff; }
+:root:is([data-theme="dark"], [data-theme="rockets"], [data-theme="bulls"], [data-theme="germany"], [data-theme="dirk"], [data-theme="bird"], [data-theme="alba"], [data-theme="knicks"]) :is(footer, .member-greeting, .week-heading) { color: #fff; }
 :root:is([data-theme="dark"], [data-theme="rockets"], [data-theme="bulls"], [data-theme="germany"], [data-theme="dirk"], [data-theme="bird"], [data-theme="alba"], [data-theme="knicks"]) footer a { color: #fff; }
 .card { color: #182526; }
 .btn-primary:hover { background: var(--accent); filter: brightness(.8); }
